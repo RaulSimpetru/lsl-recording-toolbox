@@ -1,0 +1,16 @@
+[package]
+name = "lsl-recorder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lsl = "0.1.1"
+tokio = { version = "1.0", features = ["full"] }
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1.0", features = ["v4"] }
+tempfile = "3.0"

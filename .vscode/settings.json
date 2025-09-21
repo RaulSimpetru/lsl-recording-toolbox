@@ -1,0 +1,12 @@
+{
+    "python.terminal.executeInFileDir": true,
+    "terminal.integrated.env.linux": {
+        "PYLSL_LIB": "/home/linuxbrew/.linuxbrew/opt/lsl/lib/liblsl.so",
+        "CXXFLAGS": "-DPTHREAD_STACK_MIN=16384"
+    },
+    "folders": [
+        {
+            "path": "/home/oj98yqyk/code/Biosignal-Device-Interface"
+        }
+    ]
+} 
