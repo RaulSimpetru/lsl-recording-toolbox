@@ -299,8 +299,7 @@ checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 [[package]]
 name = "lsl"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1853f0e53f4c3f03d0275a146de3cbf57462b0bb8f32fa822f024b17faf9dfa"
+source = "git+https://github.com/labstreaminglayer/liblsl-rust.git?rev=afa1d251674591c11ebc06070de60914b6dafccf#afa1d251674591c11ebc06070de60914b6dafccf"
 dependencies = [
  "lsl-sys",
 ]
@@ -324,8 +323,7 @@ dependencies = [
 [[package]]
 name = "lsl-sys"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "746a27be6e9798d1baa58033d391b62190e9f6def7fca082362942ae114bfda6"
+source = "git+https://github.com/labstreaminglayer/liblsl-rust.git?rev=afa1d251674591c11ebc06070de60914b6dafccf#afa1d251674591c11ebc06070de60914b6dafccf"
 dependencies = [
  "cmake",
 ]

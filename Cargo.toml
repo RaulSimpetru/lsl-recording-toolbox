@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lsl = "0.1.1"
+lsl = {git = "https://github.com/labstreaminglayer/liblsl-rust.git", rev = "afa1d251674591c11ebc06070de60914b6dafccf"}
 tokio = { version = "1.0", features = ["full"] }
 clap = { version = "4.0", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
