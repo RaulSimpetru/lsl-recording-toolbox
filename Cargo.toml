@@ -23,3 +23,19 @@ chrono = { version = "0.4", features = ["serde"] }
 [[example]]
 name = "multi_recorder"
 path = "examples/multi_recorder.rs"
+
+[[example]]
+name = "sync_validator"
+path = "examples/sync_validator.rs"
+
+[[example]]
+name = "merge_hdf5"
+path = "examples/merge_hdf5.rs"
+
+[[example]]
+name = "sync_multi_recorder"
+path = "examples/sync_multi_recorder.rs"
+
+[[example]]
+name = "inspect_metadata"
+path = "examples/inspect_metadata.rs"

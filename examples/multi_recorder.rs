@@ -42,7 +42,7 @@ fn main() -> Result<()> {
     let mut recorder1 = Command::new("./target/debug/lsl-recorder")
         .args([
             "--interactive",
-            "--source-id", "muovi-180319",
+            "--source-id", "1234",
             "--stream-name", "EMG",
             "-o", "experiment",
             "--subject", "P001",
