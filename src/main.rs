@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod hdf5;
 mod lsl;
+mod merger;
 
 use anyhow::Result;
 use clap::Parser;
