@@ -21,21 +21,21 @@ pub fn open_or_create_hdf5_file(
 
     // Try to open existing file first
     if file_path.exists() {
-        // Try to open existing file with retries
-        for attempt in 0..3 {
+        // Try to open existing file with fast retries
+        for attempt in 0..2 {
             match File::open_rw(file_path) {
                 Ok(file) => return Ok(file),
                 Err(e) => {
-                    if attempt < 2 {
+                    if attempt < 1 {
                         eprintln!(
                             "Warning: Failed to open existing HDF5 file (attempt {}): {}",
                             attempt + 1,
                             e
                         );
-                        std::thread::sleep(Duration::from_millis(100 * (attempt + 1) as u64));
+                        std::thread::sleep(Duration::from_millis(10 + fastrand::u64(0..20))); // 10-30ms with jitter
                     } else {
                         return Err(anyhow::anyhow!(
-                            "Failed to open existing HDF5 file after 3 attempts: {}",
+                            "Failed to open existing HDF5 file after 2 attempts: {}",
                             e
                         ));
                     }
@@ -45,7 +45,7 @@ pub fn open_or_create_hdf5_file(
     }
 
     // File doesn't exist, try to create it
-    for attempt in 0..3 {
+    for attempt in 0..2 {
         match create_hdf5_file_with_structure(file_path, subject, session_id, notes) {
             Ok(file) => return Ok(file),
             Err(e) => {
@@ -64,16 +64,16 @@ pub fn open_or_create_hdf5_file(
                     }
                 }
 
-                if attempt < 2 {
+                if attempt < 1 {
                     eprintln!(
                         "Warning: Failed to create HDF5 file (attempt {}): {}",
                         attempt + 1,
                         e
                     );
-                    std::thread::sleep(Duration::from_millis(50 * (attempt + 1) as u64));
+                    std::thread::sleep(Duration::from_millis(5 + fastrand::u64(0..15))); // 5-20ms with jitter
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Failed to create HDF5 file after 3 attempts: {}",
+                        "Failed to create HDF5 file after 2 attempts: {}",
                         e
                     ));
                 }

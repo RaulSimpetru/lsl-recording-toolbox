@@ -6,9 +6,9 @@ use std::sync::{
     Arc,
 };
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::hdf5::writer::{Hdf5Writer, SampleData};
+use crate::hdf5::writer::Hdf5Writer;
 use crate::hdf5::{open_or_create_hdf5_file, setup_stream_group};
 use crate::cli::Args;
 
@@ -27,10 +27,10 @@ pub fn resolve_lsl_stream_with_retry(
     }
 
     for attempt in 0..max_attempts {
-        // Add random delay to reduce race conditions between multiple processes
+        // Add smart delay to reduce race conditions between multiple processes
         if attempt > 0 {
-            let random_delay = fastrand::u64(0..50); // Random 0-50ms
-            let delay = Duration::from_millis(base_delay_ms * attempt as u64 + random_delay);
+            let jitter = fastrand::u64(0..20); // Smaller jitter: 0-20ms
+            let delay = Duration::from_millis(base_delay_ms + jitter);
             if !quiet {
                 println!("Retrying stream resolution in {:?}...", delay);
             }
@@ -173,7 +173,24 @@ pub fn record_lsl_stream(
             let buffer_size = if immediate_flush {
                 1
             } else {
-                flush_buffer_size
+                // Adaptive buffer sizing based on stream rate - aim for ~1 second of data
+                let adaptive_size = if info.nominal_srate() > 0.0 {
+                    // Target 1 second of buffering, but clamp to reasonable bounds
+                    // This ensures consistent memory usage regardless of sample rate
+                    let target_buffer_time_secs = 1.0;
+                    let calculated_size = (info.nominal_srate() * target_buffer_time_secs) as usize;
+
+                    // Clamp between 10 samples (very low rate) and 2000 samples (very high rate)
+                    calculated_size.clamp(10, 2000)
+                } else {
+                    flush_buffer_size // Unknown rate, use default
+                };
+
+                if !quiet {
+                    println!("Using adaptive buffer size: {} samples for {:.1}Hz stream",
+                            adaptive_size, info.nominal_srate());
+                }
+                adaptive_size
             };
             Some(Hdf5Writer::new(
                 data_dataset,
@@ -189,7 +206,7 @@ pub fn record_lsl_stream(
     // Create appropriate sample buffer based on channel format
     let channel_format = info.channel_format();
 
-    // Create single sample buffer for the detected type
+    // Create single sample buffer for the detected type - pre-allocated with channel capacity
     enum SampleBuffer {
         Float32(Vec<f32>),
         Float64(Vec<f64>),
@@ -199,13 +216,14 @@ pub fn record_lsl_stream(
         String(Vec<String>),
     }
 
+    let channel_count = info.channel_count() as usize;
     let mut sample_buffer = match channel_format {
-        lsl::ChannelFormat::Float32 => SampleBuffer::Float32(Vec::new()),
-        lsl::ChannelFormat::Double64 => SampleBuffer::Float64(Vec::new()),
-        lsl::ChannelFormat::Int32 => SampleBuffer::Int32(Vec::new()),
-        lsl::ChannelFormat::Int16 => SampleBuffer::Int16(Vec::new()),
-        lsl::ChannelFormat::Int8 => SampleBuffer::Int8(Vec::new()),
-        lsl::ChannelFormat::String => SampleBuffer::String(Vec::new()),
+        lsl::ChannelFormat::Float32 => SampleBuffer::Float32(Vec::with_capacity(channel_count)),
+        lsl::ChannelFormat::Double64 => SampleBuffer::Float64(Vec::with_capacity(channel_count)),
+        lsl::ChannelFormat::Int32 => SampleBuffer::Int32(Vec::with_capacity(channel_count)),
+        lsl::ChannelFormat::Int16 => SampleBuffer::Int16(Vec::with_capacity(channel_count)),
+        lsl::ChannelFormat::Int8 => SampleBuffer::Int8(Vec::with_capacity(channel_count)),
+        lsl::ChannelFormat::String => SampleBuffer::String(Vec::with_capacity(channel_count)),
         _ => {
             return Err(anyhow::anyhow!(
                 "Unsupported channel format: {:?}",
@@ -215,6 +233,11 @@ pub fn record_lsl_stream(
     };
 
     let mut sample_count: u64 = 0;
+    let mut last_memory_report = if recorder_args.memory_monitor {
+        Some(Instant::now())
+    } else {
+        None
+    };
 
     loop {
         if quit.load(Ordering::SeqCst) {
@@ -223,13 +246,16 @@ pub fn record_lsl_stream(
 
         if recording.load(Ordering::SeqCst) {
             macro_rules! pull_and_record {
-                ($buf:expr, $sample_data_variant:ident) => {{
+                ($buf:expr, $method:ident) => {{
+                    // Clear buffer and reuse capacity
+                    $buf.clear();
                     let ts = inl
                         .pull_sample_buf($buf, pull_timeout)
                         .map_err(|e| anyhow::anyhow!("LSL error: {}", e))?;
                     if ts != 0.0 {
                         if let Some(ref mut writer) = hdf5_writer {
-                            writer.add_sample(SampleData::$sample_data_variant($buf.clone()), ts);
+                            // Pass data by slice reference to avoid full clone
+                            writer.$method(&$buf, ts);
                         }
                     }
                     ts
@@ -237,12 +263,12 @@ pub fn record_lsl_stream(
             }
 
             let ts = match &mut sample_buffer {
-                SampleBuffer::Float32(ref mut buf) => pull_and_record!(buf, Float32),
-                SampleBuffer::Float64(ref mut buf) => pull_and_record!(buf, Float64),
-                SampleBuffer::Int32(ref mut buf) => pull_and_record!(buf, Int32),
-                SampleBuffer::Int16(ref mut buf) => pull_and_record!(buf, Int16),
-                SampleBuffer::Int8(ref mut buf) => pull_and_record!(buf, Int8),
-                SampleBuffer::String(ref mut buf) => pull_and_record!(buf, String),
+                SampleBuffer::Float32(ref mut buf) => pull_and_record!(buf, add_sample_slice_f32),
+                SampleBuffer::Float64(ref mut buf) => pull_and_record!(buf, add_sample_slice_f64),
+                SampleBuffer::Int32(ref mut buf) => pull_and_record!(buf, add_sample_slice_i32),
+                SampleBuffer::Int16(ref mut buf) => pull_and_record!(buf, add_sample_slice_i16),
+                SampleBuffer::Int8(ref mut buf) => pull_and_record!(buf, add_sample_slice_i8),
+                SampleBuffer::String(ref mut buf) => pull_and_record!(buf, add_sample_slice_string),
             };
 
             if ts != 0.0 {
@@ -255,7 +281,28 @@ pub fn record_lsl_stream(
                     }
                 }
 
-                if !quiet && sample_count % 100 == 0 {
+                // Memory monitoring report every 10 seconds
+                if let Some(ref mut last_report) = last_memory_report {
+                    if last_report.elapsed() >= Duration::from_secs(10) {
+                        let buffer_samples = if let Some(ref writer) = hdf5_writer {
+                            writer.buffer_sample_count()
+                        } else {
+                            0
+                        };
+
+                        println!(
+                            "📊 Memory: {} samples recorded, {} buffered samples, buffer usage: {:.1}%",
+                            sample_count,
+                            buffer_samples,
+                            if let Some(ref writer) = hdf5_writer {
+                                (buffer_samples as f64 / writer.buffer_capacity() as f64) * 100.0
+                            } else {
+                                0.0
+                            }
+                        );
+                        *last_report = Instant::now();
+                    }
+                } else if !quiet && sample_count % 100 == 0 {
                     println!("Recorded {} samples", sample_count);
                 }
             }

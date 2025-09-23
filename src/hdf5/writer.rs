@@ -34,10 +34,16 @@ pub struct Hdf5Writer {
     sample_buffer: Vec<SampleData>,
     time_buffer: Vec<f64>,
     buffer_size: usize,
+    max_buffer_size: usize, // Maximum allowed buffer size to prevent memory bloat
     current_length: usize,
     channel_format: lsl::ChannelFormat,
     last_flush_time: Instant,
     flush_interval: Duration,
+    // Pre-allocated buffer to avoid allocations during flush
+    temp_data_buffer: Vec<f64>, // Use f64 as largest type, cast as needed
+    // Backpressure monitoring
+    slow_flush_warnings: u32,
+    last_flush_duration: Duration,
 }
 
 impl Hdf5Writer {
@@ -48,6 +54,8 @@ impl Hdf5Writer {
         channel_format: lsl::ChannelFormat,
         flush_interval: Duration,
     ) -> Result<Self> {
+        // Set max buffer size to 10x normal buffer size to prevent memory bloat
+        let max_buffer_size = (buffer_size * 10).max(1000);
         let current_length = data_dataset.shape()[1]; // Second dimension is now time
         Ok(Self {
             data_dataset,
@@ -55,15 +63,45 @@ impl Hdf5Writer {
             sample_buffer: Vec::new(),
             time_buffer: Vec::new(),
             buffer_size,
+            max_buffer_size,
             current_length,
             channel_format,
             last_flush_time: Instant::now(),
             flush_interval,
+            temp_data_buffer: Vec::new(),
+            slow_flush_warnings: 0,
+            last_flush_duration: Duration::from_millis(0),
         })
     }
 
-    pub fn add_sample(&mut self, sample: SampleData, timestamp: f64) {
-        self.sample_buffer.push(sample);
+    /// Add sample by reference to avoid cloning - more efficient for hot path
+    pub fn add_sample_slice_f32(&mut self, data: &[f32], timestamp: f64) {
+        self.sample_buffer.push(SampleData::Float32(data.to_vec()));
+        self.time_buffer.push(timestamp);
+    }
+
+    pub fn add_sample_slice_f64(&mut self, data: &[f64], timestamp: f64) {
+        self.sample_buffer.push(SampleData::Float64(data.to_vec()));
+        self.time_buffer.push(timestamp);
+    }
+
+    pub fn add_sample_slice_i32(&mut self, data: &[i32], timestamp: f64) {
+        self.sample_buffer.push(SampleData::Int32(data.to_vec()));
+        self.time_buffer.push(timestamp);
+    }
+
+    pub fn add_sample_slice_i16(&mut self, data: &[i16], timestamp: f64) {
+        self.sample_buffer.push(SampleData::Int16(data.to_vec()));
+        self.time_buffer.push(timestamp);
+    }
+
+    pub fn add_sample_slice_i8(&mut self, data: &[i8], timestamp: f64) {
+        self.sample_buffer.push(SampleData::Int8(data.to_vec()));
+        self.time_buffer.push(timestamp);
+    }
+
+    pub fn add_sample_slice_string(&mut self, data: &[String], timestamp: f64) {
+        self.sample_buffer.push(SampleData::String(data.to_vec()));
         self.time_buffer.push(timestamp);
     }
 
@@ -71,6 +109,8 @@ impl Hdf5Writer {
         if self.sample_buffer.is_empty() {
             return Ok(());
         }
+
+        let flush_start = Instant::now();
 
         let num_samples = self.sample_buffer.len();
         let num_channels = self.sample_buffer[0].len();
@@ -80,20 +120,30 @@ impl Hdf5Writer {
         self.data_dataset.resize((num_channels, new_length))?;
         self.time_dataset.resize(new_length)?;
 
-        // Prepare time as 1D array
-        let time_array = Array1::from_vec(self.time_buffer.clone());
+        // Prepare time as 1D array - move data to avoid clone
+        let time_array = Array1::from_vec(std::mem::take(&mut self.time_buffer));
 
-        // Write data based on channel format using write_slice
+        // Write data based on channel format using write_slice - reuse temp buffer
         macro_rules! write_samples {
             ($type:ty, $variant:ident) => {{
-                let mut data_array = Array2::<$type>::zeros((num_channels, num_samples));
-                for (i, sample) in self.sample_buffer.iter().enumerate() {
-                    if let SampleData::$variant(values) = sample {
-                        for (j, &value) in values.iter().enumerate() {
-                            data_array[[j, i]] = value; // j is channel, i is time
+                // Prepare flattened data buffer
+                self.temp_data_buffer.clear();
+                self.temp_data_buffer.reserve(num_channels * num_samples);
+
+                // Fill buffer in column-major order (HDF5 format)
+                for i in 0..num_samples {
+                    if let SampleData::$variant(values) = &self.sample_buffer[i] {
+                        for &value in values.iter() {
+                            self.temp_data_buffer.push(value as f64);
                         }
                     }
                 }
+
+                // Cast to target type and create array
+                let typed_data: Vec<$type> = self.temp_data_buffer.iter()
+                    .map(|&x| x as $type).collect();
+                let data_array = Array2::<$type>::from_shape_vec((num_channels, num_samples), typed_data)?;
+
                 self.data_dataset
                     .write_slice(&data_array, (.., self.current_length..new_length))?;
             }};
@@ -120,21 +170,41 @@ impl Hdf5Writer {
         self.sample_buffer.clear();
         self.time_buffer.clear();
 
-        // Update last flush time
-        self.last_flush_time = Instant::now();
-
         // Flush datasets to ensure data is written to disk
         self.data_dataset.file()?.flush()?;
 
-        println!(
-            "HDF5: Wrote {} samples (total: {} samples) - {:?}",
-            num_samples, self.current_length, self.channel_format
-        );
+        // Monitor flush performance and detect backpressure
+        let flush_duration = flush_start.elapsed();
+        self.last_flush_duration = flush_duration;
+        self.last_flush_time = Instant::now();
+
+        // Warn about slow flushes that might indicate backpressure
+        if flush_duration > Duration::from_millis(100) {
+            self.slow_flush_warnings += 1;
+            if self.slow_flush_warnings <= 5 { // Only warn first 5 times
+                println!(
+                    "⚠️  Slow HDF5 flush: {:.1}ms for {} samples (warning {}/5)",
+                    flush_duration.as_millis(), num_samples, self.slow_flush_warnings
+                );
+            }
+        }
+
+        if self.slow_flush_warnings <= 5 {
+            println!(
+                "HDF5: Wrote {} samples (total: {} samples, {:.1}ms flush)",
+                num_samples, self.current_length, flush_duration.as_millis()
+            );
+        }
 
         Ok(())
     }
 
     pub fn needs_flush(&self) -> bool {
+        // Force flush if approaching memory limit (emergency flush)
+        if self.sample_buffer.len() >= self.max_buffer_size {
+            return true;
+        }
+
         // Check buffer size threshold
         if self.sample_buffer.len() >= self.buffer_size {
             return true;
@@ -145,6 +215,22 @@ impl Hdf5Writer {
             return true;
         }
 
+        // Force flush if we're accumulating samples faster than we can write (backpressure)
+        if self.sample_buffer.len() > self.buffer_size / 2
+           && self.last_flush_duration > Duration::from_millis(50) {
+            return true;
+        }
+
         false
+    }
+
+    /// Get current buffer sample count for monitoring
+    pub fn buffer_sample_count(&self) -> usize {
+        self.sample_buffer.len()
+    }
+
+    /// Get buffer capacity for monitoring
+    pub fn buffer_capacity(&self) -> usize {
+        self.max_buffer_size
     }
 }

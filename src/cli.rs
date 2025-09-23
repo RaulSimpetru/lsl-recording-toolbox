@@ -96,7 +96,7 @@ pub struct Args {
 
     #[arg(
         long,
-        default_value = "100",
+        default_value = "50",
         help = "Base delay in milliseconds between LSL retry attempts"
     )]
     pub lsl_retry_base_delay_ms: u64,
@@ -106,6 +106,12 @@ pub struct Args {
         help = "LSL pull timeout in seconds (auto-calculated from stream frequency if not set)"
     )]
     pub lsl_pull_timeout: Option<f64>,
+
+    #[arg(
+        long,
+        help = "Enable memory usage monitoring and periodic reporting"
+    )]
+    pub memory_monitor: bool,
 }
 
 impl Args {
