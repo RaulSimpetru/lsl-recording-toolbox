@@ -30,10 +30,10 @@ fn spawn_output_reader<R: BufRead + Send + 'static>(
     })
 }
 
-/// Example parent program demonstrating how to spawn and control
-/// multiple lsl-recorder instances independently using anonymous pipes.
-/// This demo shows recording multiple streams (EMG, EEG) to a shared HDF5 file
-/// with different stream groups and metadata.
+/// Example parent program demonstrating synchronized recording from multiple streams.
+/// This demo spawns two lsl-recorder instances that start and stop recording
+/// simultaneously, ensuring equal recording durations across different streams.
+/// Each recorder writes to its own HDF5 file with automatic naming.
 fn main() -> Result<()> {
     let start_time = Instant::now();
     log_with_time("Spawning multiple LSL recorders...", start_time);
@@ -43,8 +43,8 @@ fn main() -> Result<()> {
         .args([
             "--interactive",
             "--source-id", "muovi-180319",
-            "--hdf5-file", "experiment1.h5",
-            "--swmr",
+            "--stream-name", "EMG",
+            "-o", "experiment",
             "--subject", "P001",
             "--session-id", "session_001",
             "--notes", "Multi-stream recording demo"
@@ -59,8 +59,8 @@ fn main() -> Result<()> {
         .args([
             "--interactive",
             "--source-id", "1234",
-            "--hdf5-file", "experiment2.h5",
-            "--swmr"
+            "--stream-name", "EEG",
+            "-o", "experiment"
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -84,35 +84,27 @@ fn main() -> Result<()> {
     let _stdout2_thread = spawn_output_reader(BufReader::new(stdout2), "EEG-OUT", start_time);
     let _stderr2_thread = spawn_output_reader(BufReader::new(stderr2), "EEG-ERR", start_time);
 
-    // Example control sequence
-    log_with_time("Sending START command to both recorders...", start_time);
+    // Synchronized control sequence - both recorders start and stop together
+    log_with_time("Sending START command to both recorders simultaneously...", start_time);
     writeln!(stdin1, "START")?;
-    log_with_time("  → START sent to recorder1", start_time);
     writeln!(stdin2, "START")?;
-    log_with_time("  → START sent to recorder2", start_time);
+    log_with_time("  → START sent to both recorders", start_time);
 
-    log_with_time("Waiting 2 seconds...", start_time);
-    thread::sleep(Duration::from_secs(2));
+    log_with_time("Recording for 10 seconds...", start_time);
+    thread::sleep(Duration::from_secs(10));
 
-    log_with_time("Setting recorder2 to stop after 5 seconds...", start_time);
-    writeln!(stdin2, "STOP_AFTER 5")?;
-    log_with_time("  → STOP_AFTER 5 sent to recorder2", start_time);
-
-    log_with_time("Waiting 3 seconds...", start_time);
-    thread::sleep(Duration::from_secs(3));
-
-    log_with_time("Stopping recorder1...", start_time);
+    log_with_time("Sending STOP command to both recorders simultaneously...", start_time);
     writeln!(stdin1, "STOP")?;
-    log_with_time("  → STOP sent to recorder1", start_time);
+    writeln!(stdin2, "STOP")?;
+    log_with_time("  → STOP sent to both recorders", start_time);
 
-    log_with_time("Waiting 3 seconds...", start_time);
-    thread::sleep(Duration::from_secs(3));
+    log_with_time("Waiting 2 seconds before cleanup...", start_time);
+    thread::sleep(Duration::from_secs(2));
 
     log_with_time("Sending QUIT to both recorders...", start_time);
     writeln!(stdin1, "QUIT")?;
-    log_with_time("  → QUIT sent to recorder1", start_time);
     writeln!(stdin2, "QUIT")?;
-    log_with_time("  → QUIT sent to recorder2", start_time);
+    log_with_time("  → QUIT sent to both recorders", start_time);
 
     // Wait for processes to finish
     log_with_time("Waiting for processes to finish...", start_time);
@@ -122,6 +114,18 @@ fn main() -> Result<()> {
     log_with_time("  → recorder2 finished", start_time);
 
     log_with_time("All recorders finished successfully", start_time);
+
+    log_with_time("📁 Files created with JSON metadata:", start_time);
+    log_with_time("  → experiment_EMG.h5 (EMG stream data + JSON metadata)", start_time);
+    log_with_time("  → experiment_EEG.h5 (EEG stream data + JSON metadata)", start_time);
+    log_with_time("", start_time);
+    log_with_time("🔍 To inspect the JSON metadata:", start_time);
+    log_with_time("  python3 examples/inspect_hdf5_metadata.py", start_time);
+    log_with_time("", start_time);
+    log_with_time("📊 JSON metadata includes:", start_time);
+    log_with_time("  • Complete LSL stream information (channels, rates, etc.)", start_time);
+    log_with_time("  • Full recorder configuration (flush settings, timeouts, etc.)", start_time);
+    log_with_time("  • Exact recording timestamps and session metadata", start_time);
 
     Ok(())
 }
