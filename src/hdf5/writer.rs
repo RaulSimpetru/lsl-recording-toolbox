@@ -130,11 +130,11 @@ impl Hdf5Writer {
                 self.temp_data_buffer.clear();
                 self.temp_data_buffer.reserve(num_channels * num_samples);
 
-                // Fill buffer in column-major order (HDF5 format)
-                for i in 0..num_samples {
-                    if let SampleData::$variant(values) = &self.sample_buffer[i] {
-                        for &value in values.iter() {
-                            self.temp_data_buffer.push(value as f64);
+                // Fill buffer in column-major order (channel-first layout for HDF5)
+                for channel in 0..num_channels {
+                    for i in 0..num_samples {
+                        if let SampleData::$variant(values) = &self.sample_buffer[i] {
+                            self.temp_data_buffer.push(values[channel] as f64);
                         }
                     }
                 }
