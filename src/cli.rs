@@ -107,10 +107,7 @@ pub struct Args {
     )]
     pub lsl_pull_timeout: Option<f64>,
 
-    #[arg(
-        long,
-        help = "Enable memory usage monitoring and periodic reporting"
-    )]
+    #[arg(long, help = "Enable memory usage monitoring and periodic reporting")]
     pub memory_monitor: bool,
 }
 
@@ -145,7 +142,10 @@ impl Args {
     }
 
     /// Serialize recorder configuration to JSON string
-    pub fn to_recorder_config_json(&self, recording_start_time: Option<String>) -> anyhow::Result<String> {
+    pub fn to_recorder_config_json(
+        &self,
+        recording_start_time: Option<String>,
+    ) -> anyhow::Result<String> {
         let config_json = json!({
             "flush_interval": self.flush_interval,
             "flush_buffer_size": self.flush_buffer_size,

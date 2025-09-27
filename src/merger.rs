@@ -31,19 +31,19 @@ pub struct MergerConfig {
 
 #[derive(Debug)]
 pub enum TimeReference {
-    FirstStream,      // Use the earliest start time as reference
-    LastStream,       // Use the latest start time as reference
-    AbsoluteZero,     // Align all timestamps to start from 0
-    KeepOriginal,     // Keep original timestamps
-    CommonStart,      // Set 0.0 as the first timestamp where ALL streams have data
+    FirstStream,  // Use the earliest start time as reference
+    LastStream,   // Use the latest start time as reference
+    AbsoluteZero, // Align all timestamps to start from 0
+    KeepOriginal, // Keep original timestamps
+    CommonStart,  // Set 0.0 as the first timestamp where ALL streams have data
 }
 
 #[derive(Debug)]
 pub enum ConflictResolution {
-    Error,            // Fail on conflicts
-    UseFirst,         // Use metadata from first encountered stream
-    UseLast,          // Use metadata from last encountered stream
-    Merge,            // Attempt to merge metadata intelligently
+    Error,    // Fail on conflicts
+    UseFirst, // Use metadata from first encountered stream
+    UseLast,  // Use metadata from last encountered stream
+    Merge,    // Attempt to merge metadata intelligently
 }
 
 impl Default for MergerConfig {
@@ -79,7 +79,7 @@ impl Hdf5Merger {
         let path = file_path.as_ref();
         let file_path_str = path.to_string_lossy().to_string();
 
-        println!("📂 Loading: {}", file_path_str);
+        println!("Loading file:\t{}", file_path_str);
 
         let file = File::open(path)?;
 
@@ -91,7 +91,10 @@ impl Hdf5Merger {
                     let value = if let Ok(unicode_val) = attr.read_scalar::<VarLenUnicode>() {
                         Value::String(unicode_val.to_string())
                     } else if let Ok(f64_val) = attr.read_scalar::<f64>() {
-                        Value::Number(serde_json::Number::from_f64(f64_val).unwrap_or_else(|| serde_json::Number::from(0)))
+                        Value::Number(
+                            serde_json::Number::from_f64(f64_val)
+                                .unwrap_or_else(|| serde_json::Number::from(0)),
+                        )
                     } else if let Ok(i64_val) = attr.read_scalar::<i64>() {
                         Value::Number(serde_json::Number::from(i64_val))
                     } else {
@@ -135,9 +138,12 @@ impl Hdf5Merger {
                 // Load metadata
                 if let Ok(stream_info_attr) = stream_group.attr("stream_info_json") {
                     if let Ok(unicode_val) = stream_info_attr.read_scalar::<VarLenUnicode>() {
-                        if let Ok(parsed) = serde_json::from_str::<Value>(&unicode_val.to_string()) {
+                        if let Ok(parsed) = serde_json::from_str::<Value>(&unicode_val.to_string())
+                        {
                             stream_info.stream_metadata = parsed.clone();
-                            if let Some(format) = parsed.get("channel_format").and_then(|v| v.as_str()) {
+                            if let Some(format) =
+                                parsed.get("channel_format").and_then(|v| v.as_str())
+                            {
                                 stream_info.channel_format = format.to_string();
                             }
                         }
@@ -146,14 +152,19 @@ impl Hdf5Merger {
 
                 if let Ok(recorder_config_attr) = stream_group.attr("recorder_config_json") {
                     if let Ok(unicode_val) = recorder_config_attr.read_scalar::<VarLenUnicode>() {
-                        if let Ok(parsed) = serde_json::from_str::<Value>(&unicode_val.to_string()) {
+                        if let Ok(parsed) = serde_json::from_str::<Value>(&unicode_val.to_string())
+                        {
                             stream_info.recorder_config = parsed;
                         }
                     }
                 }
 
-                println!("  ✅ Stream: {} ({} samples, {} channels)",
-                         stream_name, stream_info.timestamps.len(), stream_info.data_shape.0);
+                println!(
+                    "\tStream loaded:\t{} ({} samples, {} channels)",
+                    stream_name,
+                    stream_info.timestamps.len(),
+                    stream_info.data_shape.0
+                );
 
                 self.streams.push(stream_info);
             }
@@ -166,7 +177,10 @@ impl Hdf5Merger {
         match self.config.conflict_resolution {
             ConflictResolution::Error => {
                 if self.global_metadata.contains_key(&key) {
-                    eprintln!("⚠️  Metadata conflict for key '{}' - using error resolution", key);
+                    eprintln!(
+                        "Warning: Metadata conflict for key '{}' - using error resolution",
+                        key
+                    );
                 }
                 self.global_metadata.insert(key, value);
             }
@@ -179,9 +193,36 @@ impl Hdf5Merger {
             ConflictResolution::Merge => {
                 if let Some(existing) = self.global_metadata.get(&key) {
                     if existing != &value {
-                        println!("🔀 Merging metadata for key '{}': {:?} + {:?}", key, existing, value);
-                        // For now, create an array of values
-                        let merged = json!([existing, value]);
+                        println!(
+                            "\tMerging metadata:\t'{}' = {:?} + {:?}",
+                            key, existing, value
+                        );
+
+                        // Smart merging: flatten arrays and avoid nested arrays
+                        let merged = match (existing, &value) {
+                            // If existing is already an array, append to it
+                            (Value::Array(existing_array), _) => {
+                                let mut new_array = existing_array.clone();
+                                if let Value::Array(value_array) = &value {
+                                    // If new value is also an array, extend with its elements
+                                    new_array.extend(value_array.iter().cloned());
+                                } else {
+                                    // If new value is not an array, append it directly
+                                    new_array.push(value.clone());
+                                }
+                                Value::Array(new_array)
+                            }
+                            // If new value is an array but existing is not, prepend existing
+                            (_, Value::Array(value_array)) => {
+                                let mut new_array = vec![existing.clone()];
+                                new_array.extend(value_array.iter().cloned());
+                                Value::Array(new_array)
+                            }
+                            // Neither is an array, create new array
+                            (_, _) => {
+                                json!([existing, value])
+                            }
+                        };
                         self.global_metadata.insert(key, merged);
                     }
                 } else {
@@ -202,12 +243,14 @@ impl Hdf5Merger {
 
         for stream in &self.streams {
             if let Some(&offset) = alignment_offsets.get(&stream.name) {
-                if let (Some(&first_ts), Some(&last_ts)) = (stream.timestamps.first(), stream.timestamps.last()) {
+                if let (Some(&first_ts), Some(&last_ts)) =
+                    (stream.timestamps.first(), stream.timestamps.last())
+                {
                     let aligned_start = first_ts + offset;
                     let aligned_end = last_ts + offset;
 
-                    common_start = common_start.max(aligned_start);  // Latest start
-                    common_end = common_end.min(aligned_end);        // Earliest end
+                    common_start = common_start.max(aligned_start); // Latest start
+                    common_end = common_end.min(aligned_end); // Earliest end
                 }
             }
         }
@@ -229,25 +272,30 @@ impl Hdf5Merger {
         }
 
         let reference_time = match self.config.time_reference {
-            TimeReference::FirstStream => {
-                self.streams.iter()
-                    .filter_map(|s| s.timestamps.first())
-                    .fold(f64::INFINITY, |acc, &x| acc.min(x))
-            }
-            TimeReference::LastStream => {
-                self.streams.iter()
-                    .filter_map(|s| s.timestamps.first())
-                    .fold(f64::NEG_INFINITY, |acc, &x| acc.max(x))
-            }
+            TimeReference::FirstStream => self
+                .streams
+                .iter()
+                .filter_map(|s| s.timestamps.first())
+                .fold(f64::INFINITY, |acc, &x| acc.min(x)),
+            TimeReference::LastStream => self
+                .streams
+                .iter()
+                .filter_map(|s| s.timestamps.first())
+                .fold(f64::NEG_INFINITY, |acc, &x| acc.max(x)),
             TimeReference::AbsoluteZero => 0.0,
             TimeReference::CommonStart => {
                 // Find the latest start time among all streams
-                // This ensures all streams have data from this point forward
-                let common_start = self.streams.iter()
+                // This becomes our t=0 reference point
+                let common_start = self
+                    .streams
+                    .iter()
                     .filter_map(|s| s.timestamps.first())
                     .fold(f64::NEG_INFINITY, |acc, &x| acc.max(x));
-                println!("🎯 Common start time: {:.6}s (latest stream start)", common_start);
-                common_start
+                println!(
+                    "Common start time:\t{:.6}s (latest stream start) -> t=0",
+                    common_start
+                );
+                common_start // This will be subtracted from all timestamps, making it t=0
             }
             TimeReference::KeepOriginal => return alignment_offsets, // No offsets needed
         };
@@ -256,7 +304,27 @@ impl Hdf5Merger {
             if let Some(&first_timestamp) = stream.timestamps.first() {
                 let offset = reference_time - first_timestamp;
                 alignment_offsets.insert(stream.name.clone(), offset);
-                println!("⏰ Stream '{}': offset = {:.6}s", stream.name, offset);
+
+                let offset_explanation = if offset > 0.0 {
+                    format!(
+                        "(+{:.3}ms delay - started {} ms before reference)",
+                        offset * 1000.0,
+                        (offset * 1000.0) as i32
+                    )
+                } else if offset < 0.0 {
+                    format!(
+                        "({:.3}ms early - started {} ms after reference)",
+                        offset * 1000.0,
+                        (-offset * 1000.0) as i32
+                    )
+                } else {
+                    "(perfect sync - started at reference time)".to_string()
+                };
+
+                println!(
+                    "\tStream timing:\t{} first={:.6}s, offset={:.6}s {}",
+                    stream.name, first_timestamp, offset, offset_explanation
+                );
             }
         }
 
@@ -265,19 +333,28 @@ impl Hdf5Merger {
 
     /// Merge all loaded streams into a single HDF5 file
     pub fn merge(&self) -> Result<()> {
-        println!("🔄 Starting merge process...");
-        println!("📁 Output file: {}", self.config.output_file);
+        println!("Starting merge process...");
+        println!("Output file:\t{}", self.config.output_file);
 
         let output_path = Path::new(&self.config.output_file);
 
         // Remove existing file if it exists
         if output_path.exists() {
             std::fs::remove_file(output_path)?;
-            println!("🗑️  Removed existing output file");
+            println!("Removed existing output file");
         }
 
         // Calculate time alignment
+        println!("Calculating time alignment...");
         let alignment_offsets = self.calculate_time_alignment();
+        if !alignment_offsets.is_empty() {
+            println!(
+                "\tNote: Positive offsets indicate streams that started before the reference time"
+            );
+            println!(
+                "\t      Negative offsets indicate streams that started after the reference time"
+            );
+        }
 
         // Create output file
         let output_file = File::create(output_path)?;
@@ -292,18 +369,21 @@ impl Hdf5Merger {
             match value {
                 Value::String(s) => {
                     if let Ok(unicode_val) = VarLenUnicode::from_str(s) {
-                        let _ = meta_group.new_attr::<VarLenUnicode>()
+                        let _ = meta_group
+                            .new_attr::<VarLenUnicode>()
                             .create(key.as_str())
                             .and_then(|attr| attr.write_scalar(&unicode_val));
                     }
                 }
                 Value::Number(n) => {
                     if let Some(f_val) = n.as_f64() {
-                        let _ = meta_group.new_attr::<f64>()
+                        let _ = meta_group
+                            .new_attr::<f64>()
                             .create(key.as_str())
                             .and_then(|attr| attr.write_scalar(&f_val));
                     } else if let Some(i_val) = n.as_i64() {
-                        let _ = meta_group.new_attr::<i64>()
+                        let _ = meta_group
+                            .new_attr::<i64>()
                             .create(key.as_str())
                             .and_then(|attr| attr.write_scalar(&i_val));
                     }
@@ -312,7 +392,8 @@ impl Hdf5Merger {
                     // For complex types, convert to JSON string
                     let json_str = serde_json::to_string(value)?;
                     if let Ok(unicode_val) = VarLenUnicode::from_str(&json_str) {
-                        let _ = meta_group.new_attr::<VarLenUnicode>()
+                        let _ = meta_group
+                            .new_attr::<VarLenUnicode>()
                             .create(key.as_str())
                             .and_then(|attr| attr.write_scalar(&unicode_val));
                     }
@@ -323,19 +404,24 @@ impl Hdf5Merger {
         // Add merge metadata
         if self.config.preserve_provenance {
             let merge_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
-            let _ = meta_group.new_attr::<f64>()
+            let _ = meta_group
+                .new_attr::<f64>()
                 .create("merged_at")
                 .and_then(|attr| attr.write_scalar(&merge_time));
 
-            let source_files: Vec<String> = self.streams.iter()
+            let source_files: Vec<String> = self
+                .streams
+                .iter()
                 .map(|s| s.source_file.clone())
                 .collect::<std::collections::HashSet<_>>()
                 .into_iter()
                 .collect();
 
             let sources_json = json!(source_files);
-            if let Ok(unicode_val) = VarLenUnicode::from_str(&serde_json::to_string(&sources_json)?) {
-                let _ = meta_group.new_attr::<VarLenUnicode>()
+            if let Ok(unicode_val) = VarLenUnicode::from_str(&serde_json::to_string(&sources_json)?)
+            {
+                let _ = meta_group
+                    .new_attr::<VarLenUnicode>()
                     .create("source_files")
                     .and_then(|attr| attr.write_scalar(&unicode_val));
             }
@@ -343,97 +429,162 @@ impl Hdf5Merger {
 
         // Merge each stream
         for stream in &self.streams {
-            println!("🔀 Merging stream: {}", stream.name);
+            println!("\tProcessing:\t{}", stream.name);
             self.merge_stream(&streams_group, stream, &alignment_offsets)?;
         }
 
         // Write synchronization information
         if !alignment_offsets.is_empty() {
             let offsets_json = json!(alignment_offsets);
-            if let Ok(unicode_val) = VarLenUnicode::from_str(&serde_json::to_string(&offsets_json)?) {
-                let _ = sync_group.new_attr::<VarLenUnicode>()
+            if let Ok(unicode_val) = VarLenUnicode::from_str(&serde_json::to_string(&offsets_json)?)
+            {
+                let _ = sync_group
+                    .new_attr::<VarLenUnicode>()
                     .create("time_alignment_offsets")
                     .and_then(|attr| attr.write_scalar(&unicode_val));
             }
         }
 
-        println!("✅ Merge completed successfully!");
-        println!("📊 Merged {} streams from {} files", self.streams.len(),
-                 self.streams.iter().map(|s| &s.source_file).collect::<std::collections::HashSet<_>>().len());
+        println!("\nMerge completed successfully!");
+        println!(
+            "Merged {} streams from {} files",
+            self.streams.len(),
+            self.streams
+                .iter()
+                .map(|s| &s.source_file)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+        );
 
         Ok(())
     }
 
-    fn merge_stream(&self, streams_group: &Group, stream: &StreamInfo, alignment_offsets: &HashMap<String, f64>) -> Result<()> {
+    fn merge_stream(
+        &self,
+        streams_group: &Group,
+        stream: &StreamInfo,
+        alignment_offsets: &HashMap<String, f64>,
+    ) -> Result<()> {
         // Create stream group
         let stream_group = streams_group.create_group(&stream.name)?;
 
         // Copy metadata
-        if let Ok(unicode_val) = VarLenUnicode::from_str(&serde_json::to_string(&stream.stream_metadata)?) {
-            stream_group.new_attr::<VarLenUnicode>()
+        if let Ok(unicode_val) =
+            VarLenUnicode::from_str(&serde_json::to_string(&stream.stream_metadata)?)
+        {
+            stream_group
+                .new_attr::<VarLenUnicode>()
                 .create("stream_info_json")?
                 .write_scalar(&unicode_val)?;
         }
 
-        if let Ok(unicode_val) = VarLenUnicode::from_str(&serde_json::to_string(&stream.recorder_config)?) {
-            stream_group.new_attr::<VarLenUnicode>()
+        if let Ok(unicode_val) =
+            VarLenUnicode::from_str(&serde_json::to_string(&stream.recorder_config)?)
+        {
+            stream_group
+                .new_attr::<VarLenUnicode>()
                 .create("recorder_config_json")?
                 .write_scalar(&unicode_val)?;
         }
 
         // Apply time alignment
-        let aligned_timestamps: Vec<f64> = if let Some(&offset) = alignment_offsets.get(&stream.name) {
-            stream.timestamps.iter().map(|&t| t + offset).collect()
-        } else {
-            stream.timestamps.clone()
+        let aligned_timestamps: Vec<f64> = match self.config.time_reference {
+            TimeReference::CommonStart => {
+                // For common-start: subtract the common start time to make it t=0
+                // This allows negative timestamps for data before common start
+                if let Some(&offset) = alignment_offsets.get(&stream.name) {
+                    let reference_time = stream.timestamps[0] + offset; // This is the common start time
+                    stream
+                        .timestamps
+                        .iter()
+                        .map(|&t| t - reference_time)
+                        .collect()
+                } else {
+                    stream.timestamps.clone()
+                }
+            }
+            _ => {
+                // For other alignment methods, use the traditional offset approach
+                if let Some(&offset) = alignment_offsets.get(&stream.name) {
+                    stream.timestamps.iter().map(|&t| t + offset).collect()
+                } else {
+                    stream.timestamps.clone()
+                }
+            }
         };
 
         // Apply trimming if enabled
-        let (final_timestamps, trim_start_index, trim_end_count) = if self.config.trim_start && self.config.trim_end {
+        let (final_timestamps, trim_start_index, trim_end_count) = if self.config.trim_start
+            && self.config.trim_end
+        {
             // Calculate common time window for dual trimming
             let (common_start, common_end) = self.calculate_common_time_window(alignment_offsets);
 
-            println!("  🎯 Common time window: {:.6}s to {:.6}s ({:.3}s duration)",
-                     common_start, common_end, common_end - common_start);
+            println!(
+                "\tTime window:\t{:.6}s to {:.6}s ({:.3}s duration)",
+                common_start,
+                common_end,
+                common_end - common_start
+            );
 
             // Find start index - trim to common start
-            let start_idx = aligned_timestamps.iter().position(|&t| t >= common_start).unwrap_or(0);
+            let start_idx = aligned_timestamps
+                .iter()
+                .position(|&t| t >= common_start)
+                .unwrap_or(0);
 
             // Find end index - trim to common end
-            let end_idx = aligned_timestamps.iter().rposition(|&t| t <= common_end)
-                .map(|i| i + 1)  // +1 to make it exclusive end
+            let end_idx = aligned_timestamps
+                .iter()
+                .rposition(|&t| t <= common_end)
+                .map(|i| i + 1) // +1 to make it exclusive end
                 .unwrap_or(aligned_timestamps.len());
 
             let start_trimmed = start_idx;
             let end_trimmed = aligned_timestamps.len() - end_idx;
 
             if start_trimmed > 0 || end_trimmed > 0 {
-                println!("  ✂️  Trimming {} samples at start, {} samples at end for stream '{}'",
-                         start_trimmed, end_trimmed, stream.name);
+                println!(
+                    "\tTrimming:\t{} start + {} end samples for '{}'",
+                    start_trimmed, end_trimmed, stream.name
+                );
             }
 
-            (aligned_timestamps[start_idx..end_idx].to_vec(), start_idx, end_trimmed)
+            (
+                aligned_timestamps[start_idx..end_idx].to_vec(),
+                start_idx,
+                end_trimmed,
+            )
         } else if self.config.trim_start {
             // Trim samples before t=0.0 or common start
-            let trim_index = aligned_timestamps.iter()
+            let trim_index = aligned_timestamps
+                .iter()
                 .position(|&t| t >= 0.0)
                 .unwrap_or(0);
 
             if trim_index > 0 {
-                println!("  ✂️  Trimming {} samples before t=0.0 for stream '{}'", trim_index, stream.name);
+                println!(
+                    "\tTrimming:\t{} samples before t=0.0 for '{}'",
+                    trim_index, stream.name
+                );
             }
 
             (aligned_timestamps[trim_index..].to_vec(), trim_index, 0)
         } else if self.config.trim_end {
             // Trim samples after common end time
             let (_, common_end) = self.calculate_common_time_window(alignment_offsets);
-            let end_idx = aligned_timestamps.iter().rposition(|&t| t <= common_end)
-                .map(|i| i + 1)  // +1 to make it exclusive end
+            let end_idx = aligned_timestamps
+                .iter()
+                .rposition(|&t| t <= common_end)
+                .map(|i| i + 1) // +1 to make it exclusive end
                 .unwrap_or(aligned_timestamps.len());
 
             let end_trimmed = aligned_timestamps.len() - end_idx;
             if end_trimmed > 0 {
-                println!("  ✂️  Trimming {} samples at end for stream '{}'", end_trimmed, stream.name);
+                println!(
+                    "\tTrimming:\t{} samples at end for '{}'",
+                    end_trimmed, stream.name
+                );
             }
 
             (aligned_timestamps[..end_idx].to_vec(), 0, end_trimmed)
@@ -443,7 +594,8 @@ impl Hdf5Merger {
 
         // Create and write time dataset
         let time_array = Array1::from_vec(final_timestamps);
-        let time_dataset = stream_group.new_dataset::<f64>()
+        let time_dataset = stream_group
+            .new_dataset::<f64>()
             .shape(time_array.len())
             .create("time")?;
         time_dataset.write(&time_array)?;
@@ -468,12 +620,15 @@ impl Hdf5Merger {
                     let end_index = original_samples - trim_end_count;
                     // Slice the data to remove samples at both ends
                     // Data is stored as (channels, samples), so we trim along the sample dimension
-                    source_data.slice(ndarray::s![.., trim_start_index..end_index]).to_owned()
+                    source_data
+                        .slice(ndarray::s![.., trim_start_index..end_index])
+                        .to_owned()
                 } else {
                     source_data
                 };
 
-                let data_dataset = stream_group.new_dataset::<$type>()
+                let data_dataset = stream_group
+                    .new_dataset::<$type>()
                     .shape((channels, final_samples))
                     .create("data")?;
                 data_dataset.write(&final_data)?;
@@ -494,11 +649,15 @@ impl Hdf5Merger {
         }
 
         if trim_start_index > 0 || trim_end_count > 0 {
-            println!("  ✅ Copied {} samples ({} channels, {} start + {} end trimmed) for stream '{}'",
-                     final_samples, channels, trim_start_index, trim_end_count, stream.name);
+            println!(
+                "\tCopied:\t\t{} samples ({} channels, {} start + {} end trimmed) for '{}'",
+                final_samples, channels, trim_start_index, trim_end_count, stream.name
+            );
         } else {
-            println!("  ✅ Copied {} samples ({} channels) for stream '{}'",
-                     final_samples, channels, stream.name);
+            println!(
+                "\tCopied:\t\t{} samples ({} channels) for '{}'",
+                final_samples, channels, stream.name
+            );
         }
 
         Ok(())
@@ -506,19 +665,30 @@ impl Hdf5Merger {
 
     /// Get summary of loaded streams
     pub fn summary(&self) -> String {
-        let mut summary = format!("📋 Merger Summary\n");
+        let mut summary = format!("Merger Summary\n");
         summary.push_str(&format!("==================\n"));
-        summary.push_str(&format!("🗃️  Streams loaded: {}\n", self.streams.len()));
-        summary.push_str(&format!("📁 Output file: {}\n", self.config.output_file));
-        summary.push_str(&format!("⏰ Time reference: {:?}\n", self.config.time_reference));
-        summary.push_str(&format!("🔀 Conflict resolution: {:?}\n", self.config.conflict_resolution));
-        summary.push_str(&format!("✂️  Trim start: {}\n", self.config.trim_start));
-        summary.push_str(&format!("🎯 Trim end: {}\n", self.config.trim_end));
-        summary.push_str("\n📊 Stream Details:\n");
+        summary.push_str(&format!("Streams loaded:\t\t{}\n", self.streams.len()));
+        summary.push_str(&format!("Output file:\t\t{}\n", self.config.output_file));
+        summary.push_str(&format!(
+            "Time reference:\t\t{:?}\n",
+            self.config.time_reference
+        ));
+        summary.push_str(&format!(
+            "Conflict resolution:\t{:?}\n",
+            self.config.conflict_resolution
+        ));
+        summary.push_str(&format!("Trim start:\t\t{}\n", self.config.trim_start));
+        summary.push_str(&format!("Trim end:\t\t{}\n", self.config.trim_end));
+        summary.push_str("\nStream Details:\n");
 
         for stream in &self.streams {
-            summary.push_str(&format!("  • {} ({} samples, {} channels) from {}\n",
-                                     stream.name, stream.timestamps.len(), stream.data_shape.0, stream.source_file));
+            summary.push_str(&format!(
+                "  • {} ({} samples, {} channels) from {}\n",
+                stream.name,
+                stream.timestamps.len(),
+                stream.data_shape.0,
+                stream.source_file
+            ));
         }
 
         summary

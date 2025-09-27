@@ -6,6 +6,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 LSL Recorder is a Rust command-line tool for recording Lab Streaming Layer (LSL) data streams to disk in HDF5 format. The project provides a dedicated control interface for managing recordings, with HDF5 support for hierarchical multi-stream experiments.
 
+## LSL Toolkit Binaries
+
+The project includes multiple binary tools that work together:
+
+- **`lsl-recorder`** - Main recording tool for capturing LSL streams to HDF5
+- **`lsl-merge`** - Merge multiple HDF5 files into a single synchronized file
+- **`lsl-validate`** - Analyze HDF5 files for synchronization quality and timing accuracy
+- **`lsl-inspect`** - Inspect HDF5 metadata and structure
+- **`lsl-dummy-stream`** - Generate dummy LSL streams with sine wave data for testing
+
+### Usage Examples
+
+```bash
+# Build all tools
+cargo build
+
+# Generate test stream (run in separate terminal)
+lsl-dummy-stream --name "TestEMG" --source-id "1234" --channels 8
+
+# Record data
+lsl-recorder --source-id "1234" --hdf5-file experiment_EMG.h5 --subject P001
+
+# Generate another stream for multi-stream testing
+lsl-dummy-stream --name "TestEEG" --source-id "5678" --type "EEG" --channels 64 --sample-rate 1000
+
+# Merge multiple files
+lsl-merge experiment_EMG.h5 experiment_EEG.h5 -o merged_experiment.h5
+
+# Validate synchronization
+lsl-validate merged_experiment.h5
+
+# Inspect file structure
+lsl-inspect merged_experiment.h5
+```
+
 ## Development Commands
 
 ### Build and Run

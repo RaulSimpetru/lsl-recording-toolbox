@@ -32,7 +32,8 @@ pub fn open_or_create_hdf5_file(
                             attempt + 1,
                             e
                         );
-                        std::thread::sleep(Duration::from_millis(10 + fastrand::u64(0..20))); // 10-30ms with jitter
+                        std::thread::sleep(Duration::from_millis(10 + fastrand::u64(0..20)));
+                    // 10-30ms with jitter
                     } else {
                         return Err(anyhow::anyhow!(
                             "Failed to open existing HDF5 file after 2 attempts: {}",
@@ -70,7 +71,8 @@ pub fn open_or_create_hdf5_file(
                         attempt + 1,
                         e
                     );
-                    std::thread::sleep(Duration::from_millis(5 + fastrand::u64(0..15))); // 5-20ms with jitter
+                    std::thread::sleep(Duration::from_millis(5 + fastrand::u64(0..15)));
+                // 5-20ms with jitter
                 } else {
                     return Err(anyhow::anyhow!(
                         "Failed to create HDF5 file after 2 attempts: {}",

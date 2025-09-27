@@ -8,9 +8,9 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::cli::Args;
 use crate::hdf5::writer::Hdf5Writer;
 use crate::hdf5::{open_or_create_hdf5_file, setup_stream_group};
-use crate::cli::Args;
 
 /// Resolve LSL stream with retry logic and random delays to avoid race conditions
 pub fn resolve_lsl_stream_with_retry(
@@ -130,7 +130,11 @@ pub fn record_lsl_stream(
         // Min 5ms (for >500Hz), Max 100ms (for <25Hz)
         let calculated = (2.5 / info.nominal_srate()).clamp(0.005, 0.1);
         if !quiet {
-            println!("Calculated pull timeout: {:.3}s (based on {:.1}Hz)", calculated, info.nominal_srate());
+            println!(
+                "Calculated pull timeout: {:.3}s (based on {:.1}Hz)",
+                calculated,
+                info.nominal_srate()
+            );
         }
         calculated
     } else {
@@ -166,9 +170,15 @@ pub fn record_lsl_stream(
 
             let channel_format = info.channel_format();
             let recording_start_time = chrono::Utc::now().to_rfc3339();
-            let recorder_config_json = recorder_args.to_recorder_config_json(Some(recording_start_time))?;
-            let (_group, data_dataset, time_dataset) =
-                setup_stream_group(&file, &stream_name, &info, channel_format, &recorder_config_json)?;
+            let recorder_config_json =
+                recorder_args.to_recorder_config_json(Some(recording_start_time))?;
+            let (_group, data_dataset, time_dataset) = setup_stream_group(
+                &file,
+                &stream_name,
+                &info,
+                channel_format,
+                &recorder_config_json,
+            )?;
 
             let buffer_size = if immediate_flush {
                 1
@@ -187,8 +197,11 @@ pub fn record_lsl_stream(
                 };
 
                 if !quiet {
-                    println!("Using adaptive buffer size: {} samples for {:.1}Hz stream",
-                            adaptive_size, info.nominal_srate());
+                    println!(
+                        "Using adaptive buffer size: {} samples for {:.1}Hz stream",
+                        adaptive_size,
+                        info.nominal_srate()
+                    );
                 }
                 adaptive_size
             };
@@ -291,7 +304,7 @@ pub fn record_lsl_stream(
                         };
 
                         println!(
-                            "📊 Memory: {} samples recorded, {} buffered samples, buffer usage: {:.1}%",
+                            "Memory status:\t{} samples recorded, {} buffered samples, buffer usage: {:.1}%",
                             sample_count,
                             buffer_samples,
                             if let Some(ref writer) = hdf5_writer {

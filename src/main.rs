@@ -95,14 +95,20 @@ async fn main() -> Result<()> {
                 "Starting direct recording for source ID: {}",
                 args.source_id
             );
-            if let Some(duration) = args.duration {
+        }
+
+        // Set up duration timer (regardless of quiet mode)
+        if let Some(duration) = args.duration {
+            if !args.quiet {
                 println!("Recording will stop after {} seconds", duration);
-                let recording_clone = recording.clone();
-                thread::spawn(move || {
-                    thread::sleep(Duration::from_secs(duration));
-                    recording_clone.store(false, Ordering::SeqCst);
-                });
             }
+            let recording_clone = recording.clone();
+            let quit_clone = quit.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(duration));
+                recording_clone.store(false, Ordering::SeqCst);
+                quit_clone.store(true, Ordering::SeqCst);
+            });
         }
 
         record_lsl_stream(

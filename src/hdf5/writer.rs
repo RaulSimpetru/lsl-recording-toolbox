@@ -140,9 +140,10 @@ impl Hdf5Writer {
                 }
 
                 // Cast to target type and create array
-                let typed_data: Vec<$type> = self.temp_data_buffer.iter()
-                    .map(|&x| x as $type).collect();
-                let data_array = Array2::<$type>::from_shape_vec((num_channels, num_samples), typed_data)?;
+                let typed_data: Vec<$type> =
+                    self.temp_data_buffer.iter().map(|&x| x as $type).collect();
+                let data_array =
+                    Array2::<$type>::from_shape_vec((num_channels, num_samples), typed_data)?;
 
                 self.data_dataset
                     .write_slice(&data_array, (.., self.current_length..new_length))?;
@@ -181,10 +182,13 @@ impl Hdf5Writer {
         // Warn about slow flushes that might indicate backpressure
         if flush_duration > Duration::from_millis(100) {
             self.slow_flush_warnings += 1;
-            if self.slow_flush_warnings <= 5 { // Only warn first 5 times
+            if self.slow_flush_warnings <= 5 {
+                // Only warn first 5 times
                 println!(
-                    "⚠️  Slow HDF5 flush: {:.1}ms for {} samples (warning {}/5)",
-                    flush_duration.as_millis(), num_samples, self.slow_flush_warnings
+                    "Warning: Slow HDF5 flush detected:\t{:.1}ms for {} samples (warning {}/5)",
+                    flush_duration.as_millis(),
+                    num_samples,
+                    self.slow_flush_warnings
                 );
             }
         }
@@ -192,7 +196,9 @@ impl Hdf5Writer {
         if self.slow_flush_warnings <= 5 {
             println!(
                 "HDF5: Wrote {} samples (total: {} samples, {:.1}ms flush)",
-                num_samples, self.current_length, flush_duration.as_millis()
+                num_samples,
+                self.current_length,
+                flush_duration.as_millis()
             );
         }
 
@@ -217,7 +223,8 @@ impl Hdf5Writer {
 
         // Force flush if we're accumulating samples faster than we can write (backpressure)
         if self.sample_buffer.len() > self.buffer_size / 2
-           && self.last_flush_duration > Duration::from_millis(50) {
+            && self.last_flush_duration > Duration::from_millis(50)
+        {
             return true;
         }
 

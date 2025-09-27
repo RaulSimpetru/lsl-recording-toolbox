@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
-use lsl_recorder::merger::{Hdf5Merger, MergerConfig, TimeReference, ConflictResolution};
+use lsl_recorder::merger::{ConflictResolution, Hdf5Merger, MergerConfig, TimeReference};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "merge_hdf5")]
+#[command(name = "lsl-merge")]
 #[command(about = "Merge multiple HDF5 files created by lsl-recorder into a single file")]
 struct Args {
     /// Input HDF5 files to merge
@@ -23,7 +23,7 @@ struct Args {
         long = "time-ref",
         help = "Time reference strategy for alignment",
         value_enum,
-        default_value = "first-stream"
+        default_value = "common-start"
     )]
     time_reference: TimeReferenceArg,
 
@@ -47,12 +47,6 @@ struct Args {
         help = "Verbose output with detailed progress information"
     )]
     verbose: bool,
-
-    #[arg(
-        long = "dry-run",
-        help = "Show what would be merged without creating output file"
-    )]
-    dry_run: bool,
 
     #[arg(
         long = "trim-start",
@@ -116,60 +110,16 @@ impl From<ConflictResolutionArg> for ConflictResolution {
     }
 }
 
-fn print_usage_examples() {
-    println!("📖 USAGE EXAMPLES:");
-    println!("==================");
-    println!();
-    println!("🔗 Basic merge (align to first stream start time):");
-    println!("   cargo run --example merge_hdf5 -- experiment_EMG.h5 experiment_EEG.h5");
-    println!();
-    println!("🎯 Custom output file:");
-    println!("   cargo run --example merge_hdf5 -- *.h5 -o my_merged_data.h5");
-    println!();
-    println!("⏰ Align all timestamps to start from zero:");
-    println!("   cargo run --example merge_hdf5 -- *.h5 --time-ref absolute-zero");
-    println!();
-    println!("🔀 Handle metadata conflicts by using first occurrence:");
-    println!("   cargo run --example merge_hdf5 -- *.h5 --conflict use-first");
-    println!();
-    println!("🔍 Dry run to see what would be merged:");
-    println!("   cargo run --example merge_hdf5 -- *.h5 --dry-run --verbose");
-    println!();
-    println!("✂️  Drop samples before common start time:");
-    println!("   cargo run --example merge_hdf5 -- *.h5 --trim-start");
-    println!();
-    println!("🎯 Perfect synchronization (all streams start together at t=0):");
-    println!("   cargo run --example merge_hdf5 -- *.h5 --time-ref common-start --trim-start");
-    println!();
-    println!("🎯 Ultimate synchronization (all streams cover exact same time period):");
-    println!("   cargo run --example merge_hdf5 -- *.h5 --time-ref common-start --trim-start --trim-end");
-    println!();
-    println!("📋 Time reference options:");
-    println!("   • first-stream:   Align to earliest stream start time (default)");
-    println!("   • last-stream:    Align to latest stream start time");
-    println!("   • absolute-zero:  All timestamps start from 0");
-    println!("   • common-start:   Set t=0 at first timestamp where ALL streams have data");
-    println!("   • keep-original:  Preserve original timestamps");
-    println!();
-    println!("🔧 Conflict resolution options:");
-    println!("   • merge:     Combine conflicting metadata intelligently (default)");
-    println!("   • use-first: Use metadata from first encountered stream");
-    println!("   • use-last:  Use metadata from last encountered stream");
-    println!("   • error:     Fail if conflicts are detected");
-}
-
 fn main() -> Result<()> {
     let args = Args::parse();
 
     if args.input_files.is_empty() {
-        println!("❌ Error: No input files specified");
-        println!();
-        print_usage_examples();
+        println!("Error: No input files specified");
         return Ok(());
     }
 
-    println!("🔄 HDF5 Multi-Stream File Merger");
-    println!("================================");
+    println!("HDF5 Multi-Stream File Merger");
+    println!("=============================");
     println!();
 
     // Check if all input files exist
@@ -181,12 +131,14 @@ fn main() -> Result<()> {
     }
 
     if !missing_files.is_empty() {
-        println!("❌ Error: The following input files were not found:");
+        println!("Error: The following input files were not found:");
         for file in missing_files {
-            println!("   • {}", file);
+            println!("\t{}", file);
         }
         println!();
-        println!("💡 Make sure to run 'cargo run --example multi_recorder' first to generate test files.");
+        println!(
+            "Make sure to run 'cargo run --example multi_recorder' first to generate test files."
+        );
         return Ok(());
     }
 
@@ -201,13 +153,13 @@ fn main() -> Result<()> {
     };
 
     if args.verbose {
-        println!("⚙️  Configuration:");
-        println!("   📁 Output file: {}", config.output_file);
-        println!("   ⏰ Time reference: {:?}", config.time_reference);
-        println!("   🔀 Conflict resolution: {:?}", config.conflict_resolution);
-        println!("   📋 Preserve provenance: {}", config.preserve_provenance);
-        println!("   ✂️  Trim start: {}", config.trim_start);
-        println!("   🎯 Trim end: {}", config.trim_end);
+        println!("Configuration:");
+        println!("\tOutput file:\t\t{}", config.output_file);
+        println!("\tTime reference:\t\t{:?}", config.time_reference);
+        println!("\tConflict resolution:\t{:?}", config.conflict_resolution);
+        println!("\tPreserve provenance:\t{}", config.preserve_provenance);
+        println!("\tTrim start:\t\t{}", config.trim_start);
+        println!("\tTrim end:\t\t{}", config.trim_end);
         println!();
     }
 
@@ -215,11 +167,11 @@ fn main() -> Result<()> {
     let mut merger = Hdf5Merger::new(config);
 
     for file_path in &args.input_files {
-        println!("📂 Loading: {}", file_path.display());
+        println!("Loading file:\t{}", file_path.display());
         match merger.add_file(file_path) {
-            Ok(()) => println!("   ✅ Successfully loaded"),
+            Ok(()) => println!("\tLoaded successfully"),
             Err(e) => {
-                println!("   ❌ Failed to load: {}", e);
+                println!("\tFailed to load: {}", e);
                 continue;
             }
         }
@@ -228,29 +180,25 @@ fn main() -> Result<()> {
     println!();
 
     // Show summary
-    if args.verbose || args.dry_run {
+    if args.verbose {
         println!("{}", merger.summary());
         println!();
-    }
-
-    if args.dry_run {
-        println!("🔍 DRY RUN MODE - No files will be created");
-        println!("✅ Dry run completed successfully!");
-        return Ok(());
     }
 
     // Perform the merge
     match merger.merge() {
         Ok(()) => {
-            println!("🎉 SUCCESS!");
-            println!("📁 Merged file created: {}", args.output.display());
             println!();
-            println!("🔍 To validate the merged file:");
-            println!("   cargo run --example sync_validator");
-            println!("   python3 examples/inspect_hdf5_metadata.py {}", args.output.display());
+            println!("SUCCESS! Merge operation completed");
+            println!("Output file:\t{}", args.output.display());
+            println!();
+            println!("Next steps:");
+            println!("\tValidate:\tlsl-validate {}", args.output.display());
+            println!("\tInspect:\tlsl-inspect {}", args.output.display());
         }
         Err(e) => {
-            println!("❌ ERROR: Failed to merge files: {}", e);
+            println!();
+            println!("ERROR: Merge operation failed - {}", e);
             return Err(e);
         }
     }

@@ -1,9 +1,9 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use serde::{Deserialize, Serialize};
 
 /// Synchronization coordinator for multi-process recording
 #[derive(Debug)]
@@ -68,7 +68,9 @@ pub enum SyncStatus {
 impl SyncCoordinator {
     /// Create a new synchronization coordinator
     pub fn new(config: SyncConfig, participant_id: String, stream_name: String) -> Result<Self> {
-        let coordinator_file = config.base_dir.join(format!("sync_{}.json", config.session_id));
+        let coordinator_file = config
+            .base_dir
+            .join(format!("sync_{}.json", config.session_id));
 
         // Initialize or load existing state
         let state = if coordinator_file.exists() {
@@ -127,7 +129,7 @@ impl SyncCoordinator {
 
     /// Wait for all expected participants to join
     pub fn wait_for_participants(&mut self, expected_participants: &[String]) -> Result<()> {
-        println!("🔄 Waiting for participants: {:?}", expected_participants);
+        println!("Waiting for participants: {:?}", expected_participants);
 
         let start_time = Instant::now();
 
@@ -136,15 +138,19 @@ impl SyncCoordinator {
             self.update_heartbeat()?;
 
             // Check if all expected participants are present
-            let present_participants: Vec<String> = self.state.participants.iter()
+            let present_participants: Vec<String> = self
+                .state
+                .participants
+                .iter()
                 .map(|p| p.stream_name.clone())
                 .collect();
 
-            let all_present = expected_participants.iter()
+            let all_present = expected_participants
+                .iter()
                 .all(|expected| present_participants.contains(expected));
 
             if all_present {
-                println!("✅ All participants ready: {:?}", present_participants);
+                println!("All participants ready: {:?}", present_participants);
                 self.state.status = SyncStatus::ReadyToStart;
                 self.save_state()?;
                 break;
@@ -152,7 +158,8 @@ impl SyncCoordinator {
 
             // Check timeout
             if start_time.elapsed() > self.config.sync_timeout {
-                let missing: Vec<String> = expected_participants.iter()
+                let missing: Vec<String> = expected_participants
+                    .iter()
                     .filter(|expected| !present_participants.contains(expected))
                     .cloned()
                     .collect();
@@ -171,17 +178,18 @@ impl SyncCoordinator {
 
     /// Coordinate a synchronized start across all participants
     pub fn coordinate_start(&mut self) -> Result<f64> {
-        println!("🚀 Coordinating synchronized start...");
+        println!("Coordinating synchronized start...");
 
         // Calculate start time in the future to give all processes time to prepare
         let preparation_time = Duration::from_millis(100); // 100ms preparation time
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64() + preparation_time.as_secs_f64();
+        let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64()
+            + preparation_time.as_secs_f64();
 
         self.state.global_start_signal = Some(start_time);
         self.state.status = SyncStatus::Recording;
         self.save_state()?;
 
-        println!("📡 Start signal broadcasted for timestamp: {:.6}", start_time);
+        println!("Start signal broadcasted for timestamp: {:.6}", start_time);
 
         // Wait for the coordinated start time
         let target_time = UNIX_EPOCH + Duration::from_secs_f64(start_time);
@@ -195,13 +203,16 @@ impl SyncCoordinator {
         // Confirm our participation in the start
         self.confirm_start()?;
 
-        println!("✅ Synchronized start executed at timestamp: {:.6}", start_time);
+        println!(
+            "Synchronized start executed at timestamp: {:.6}",
+            start_time
+        );
         Ok(start_time)
     }
 
     /// Wait for a coordinated start signal from another coordinator
     pub fn wait_for_start_signal(&mut self) -> Result<f64> {
-        println!("⏳ Waiting for start signal...");
+        println!("Waiting for start signal...");
 
         let start_time = Instant::now();
 
@@ -210,7 +221,10 @@ impl SyncCoordinator {
             self.update_heartbeat()?;
 
             if let Some(start_signal_time) = self.state.global_start_signal {
-                println!("📡 Received start signal for timestamp: {:.6}", start_signal_time);
+                println!(
+                    "Received start signal for timestamp: {:.6}",
+                    start_signal_time
+                );
 
                 // Wait for the coordinated start time
                 let target_time = UNIX_EPOCH + Duration::from_secs_f64(start_signal_time);
@@ -224,7 +238,10 @@ impl SyncCoordinator {
                 // Confirm our participation
                 self.confirm_start()?;
 
-                println!("✅ Synchronized start executed at timestamp: {:.6}", start_signal_time);
+                println!(
+                    "Synchronized start executed at timestamp: {:.6}",
+                    start_signal_time
+                );
                 return Ok(start_signal_time);
             }
 
@@ -242,7 +259,7 @@ impl SyncCoordinator {
 
     /// Coordinate a synchronized stop across all participants
     pub fn coordinate_stop(&mut self) -> Result<f64> {
-        println!("🛑 Coordinating synchronized stop...");
+        println!("Coordinating synchronized stop...");
 
         let stop_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
         self.state.global_stop_signal = Some(stop_time);
@@ -251,13 +268,13 @@ impl SyncCoordinator {
 
         self.confirm_stop()?;
 
-        println!("✅ Synchronized stop executed at timestamp: {:.6}", stop_time);
+        println!("Synchronized stop executed at timestamp: {:.6}", stop_time);
         Ok(stop_time)
     }
 
     /// Wait for a stop signal and execute synchronized stop
     pub fn wait_for_stop_signal(&mut self) -> Result<f64> {
-        println!("⏳ Waiting for stop signal...");
+        println!("Waiting for stop signal...");
 
         let start_time = Instant::now();
 
@@ -266,11 +283,17 @@ impl SyncCoordinator {
             self.update_heartbeat()?;
 
             if let Some(stop_signal_time) = self.state.global_stop_signal {
-                println!("📡 Received stop signal for timestamp: {:.6}", stop_signal_time);
+                println!(
+                    "Received stop signal for timestamp: {:.6}",
+                    stop_signal_time
+                );
 
                 self.confirm_stop()?;
 
-                println!("✅ Synchronized stop executed at timestamp: {:.6}", stop_signal_time);
+                println!(
+                    "Synchronized stop executed at timestamp: {:.6}",
+                    stop_signal_time
+                );
                 return Ok(stop_signal_time);
             }
 
@@ -290,7 +313,12 @@ impl SyncCoordinator {
     fn confirm_start(&mut self) -> Result<()> {
         self.load_state()?;
 
-        if let Some(participant) = self.state.participants.iter_mut().find(|p| p.id == self.participant_id) {
+        if let Some(participant) = self
+            .state
+            .participants
+            .iter_mut()
+            .find(|p| p.id == self.participant_id)
+        {
             participant.start_confirmed = true;
         }
 
@@ -301,7 +329,12 @@ impl SyncCoordinator {
     fn confirm_stop(&mut self) -> Result<()> {
         self.load_state()?;
 
-        if let Some(participant) = self.state.participants.iter_mut().find(|p| p.id == self.participant_id) {
+        if let Some(participant) = self
+            .state
+            .participants
+            .iter_mut()
+            .find(|p| p.id == self.participant_id)
+        {
             participant.stop_confirmed = true;
         }
 
@@ -310,8 +343,14 @@ impl SyncCoordinator {
 
     /// Update heartbeat for this participant
     fn update_heartbeat(&mut self) -> Result<()> {
-        if let Some(participant) = self.state.participants.iter_mut().find(|p| p.id == self.participant_id) {
-            participant.last_heartbeat = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
+        if let Some(participant) = self
+            .state
+            .participants
+            .iter_mut()
+            .find(|p| p.id == self.participant_id)
+        {
+            participant.last_heartbeat =
+                SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
         }
 
         self.save_state()
@@ -345,7 +384,10 @@ impl SyncCoordinator {
     pub fn cleanup(&self) -> Result<()> {
         if self.coordinator_file.exists() {
             std::fs::remove_file(&self.coordinator_file)?;
-            println!("🗑️  Cleaned up sync file: {}", self.coordinator_file.display());
+            println!(
+                "Cleaned up synchronization file: {}",
+                self.coordinator_file.display()
+            );
         }
         Ok(())
     }
@@ -362,14 +404,14 @@ impl SyncCoordinator {
 
     /// Check if all participants have confirmed start
     pub fn all_started(&self) -> bool {
-        !self.state.participants.is_empty() &&
-        self.state.participants.iter().all(|p| p.start_confirmed)
+        !self.state.participants.is_empty()
+            && self.state.participants.iter().all(|p| p.start_confirmed)
     }
 
     /// Check if all participants have confirmed stop
     pub fn all_stopped(&self) -> bool {
-        !self.state.participants.is_empty() &&
-        self.state.participants.iter().all(|p| p.stop_confirmed)
+        !self.state.participants.is_empty()
+            && self.state.participants.iter().all(|p| p.stop_confirmed)
     }
 
     /// Get synchronization precision analysis
@@ -381,9 +423,20 @@ impl SyncCoordinator {
         }
 
         // Analyze ready time spread
-        let ready_times: Vec<f64> = self.state.participants.iter().map(|p| p.ready_time).collect();
-        analysis.ready_time_spread = ready_times.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap() -
-                                    ready_times.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+        let ready_times: Vec<f64> = self
+            .state
+            .participants
+            .iter()
+            .map(|p| p.ready_time)
+            .collect();
+        analysis.ready_time_spread = ready_times
+            .iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap()
+            - ready_times
+                .iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap();
 
         analysis.participant_count = self.state.participants.len();
         analysis.all_started = self.all_started();
@@ -418,36 +471,42 @@ pub struct SyncPrecisionAnalysis {
 
 impl SyncPrecisionAnalysis {
     pub fn print_report(&self) {
-        println!("📊 SYNCHRONIZATION PRECISION ANALYSIS");
-        println!("=====================================");
-        println!("👥 Participants: {}", self.participant_count);
-        println!("⏱️  Ready time spread: {:.3} ms", self.ready_time_spread * 1000.0);
+        println!("SYNCHRONIZATION PRECISION ANALYSIS");
+        println!("===================================");
+        println!("Participants:\t\t{}", self.participant_count);
+        println!(
+            "Ready time spread:\t{:.3} ms",
+            self.ready_time_spread * 1000.0
+        );
 
         if let Some(start_time) = self.start_signal_time {
-            println!("🚀 Start signal: {:.6}", start_time);
+            println!("Start signal:\t\t{:.6}", start_time);
         }
 
         if let Some(stop_time) = self.stop_signal_time {
-            println!("🛑 Stop signal: {:.6}", stop_time);
+            println!("Stop signal:\t\t{:.6}", stop_time);
         }
 
         if let Some(duration) = self.recording_duration {
-            println!("⏱️  Recording duration: {:.3} seconds", duration);
+            println!("Recording duration:\t{:.3} seconds", duration);
         }
 
-        println!("✅ All started: {}", self.all_started);
-        println!("✅ All stopped: {}", self.all_stopped);
+        println!("All started:\t\t{}", self.all_started);
+        println!("All stopped:\t\t{}", self.all_stopped);
 
-        let precision_status = if self.ready_time_spread < 0.005 { // 5ms
-            "🎯 EXCELLENT"
-        } else if self.ready_time_spread < 0.010 { // 10ms
-            "✅ GOOD"
-        } else if self.ready_time_spread < 0.050 { // 50ms
-            "⚠️  ACCEPTABLE"
+        let precision_status = if self.ready_time_spread < 0.005 {
+            // 5ms
+            "EXCELLENT"
+        } else if self.ready_time_spread < 0.010 {
+            // 10ms
+            "GOOD"
+        } else if self.ready_time_spread < 0.050 {
+            // 50ms
+            "ACCEPTABLE"
         } else {
-            "❌ POOR"
+            "POOR"
         };
 
-        println!("🎯 Precision rating: {}", precision_status);
+        println!("Precision rating:\t{}", precision_status);
     }
 }
