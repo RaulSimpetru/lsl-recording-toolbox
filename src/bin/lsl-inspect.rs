@@ -53,6 +53,20 @@ fn main() -> Result<()> {
                 }
             }
 
+            // Calculate and show recording duration
+            if let Ok(time_dataset) = stream_group.dataset("time") {
+                if let Ok(time_data) = time_dataset.read_raw::<f64>() {
+                    if time_data.len() >= 2 {
+                        let first_time = time_data[0];
+                        let last_time = time_data[time_data.len() - 1];
+                        let duration = last_time - first_time;
+                        println!("\t\tRecording duration: {:.3} seconds ({} samples)", duration, time_data.len());
+                    } else if time_data.len() == 1 {
+                        println!("\t\tRecording duration: single sample");
+                    }
+                }
+            }
+
             // Show attributes
             for attr_name in stream_group.attr_names()? {
                 if let Ok(attr) = stream_group.attr(&attr_name) {
