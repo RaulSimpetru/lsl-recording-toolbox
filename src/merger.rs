@@ -7,6 +7,9 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// Note: These types are used by lsl-merge binary, but appear as unused to the compiler
+// when checking the library crate in isolation. This is a false positive.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct StreamInfo {
     pub name: String,
@@ -19,6 +22,7 @@ pub struct StreamInfo {
     pub data_dataset: Option<Dataset>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct MergerConfig {
     pub output_file: String,
@@ -29,6 +33,7 @@ pub struct MergerConfig {
     pub trim_end: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum TimeReference {
     FirstStream,  // Use the earliest start time as reference
@@ -38,6 +43,7 @@ pub enum TimeReference {
     CommonStart,  // Set 0.0 as the first timestamp where ALL streams have data
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum ConflictResolution {
     Error,    // Fail on conflicts
@@ -59,12 +65,14 @@ impl Default for MergerConfig {
     }
 }
 
+#[allow(dead_code)]
 pub struct Hdf5Merger {
     config: MergerConfig,
     streams: Vec<StreamInfo>,
     global_metadata: HashMap<String, Value>,
 }
 
+#[allow(dead_code)]
 impl Hdf5Merger {
     pub fn new(config: MergerConfig) -> Self {
         Self {
