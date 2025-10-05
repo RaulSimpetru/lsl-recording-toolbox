@@ -36,6 +36,10 @@ path = "src/bin/lsl-inspect.rs"
 name = "lsl-dummy-stream"
 path = "src/bin/lsl-dummy-stream.rs"
 
+[[bin]]
+name = "lsl-multi-recorder"
+path = "src/bin/lsl-multi-recorder.rs"
+
 [[example]]
 name = "multi_recorder"
 path = "examples/multi_recorder.rs"

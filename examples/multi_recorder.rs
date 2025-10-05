@@ -30,15 +30,26 @@ fn spawn_output_reader<R: BufRead + Send + 'static>(
     })
 }
 
-/// Example parent program demonstrating synchronized recording from multiple streams.
-/// This demo spawns two lsl-recorder instances that start and stop recording
-/// simultaneously, ensuring equal recording durations across different streams.
-/// Each recorder writes to its own HDF5 file with automatic naming.
+/// Example demonstrating the lsl-multi-recorder tool for synchronized multi-stream recording.
+///
+/// This demo shows how to use the `lsl-multi-recorder` binary to record multiple LSL streams
+/// with unified START/STOP/QUIT control. The multi-recorder handles process management and
+/// command broadcasting, making it much simpler than manually spawning individual recorders.
+///
+/// Benefits of using lsl-multi-recorder:
+/// - Single command to control all recorders
+/// - Synchronized start/stop timing across all streams
+/// - Shared metadata (subject, session, notes) across all recordings
+/// - Automatic output labeling and process management
+/// - Clean shutdown of all child processes
 fn main() -> Result<()> {
     let start_time = Instant::now();
-    log_with_time("Starting LSL dummy stream generators...", start_time);
+    log_with_time("🚀 Multi-Stream Recording Demo", start_time);
+    log_with_time("", start_time);
 
-    // Spawn dummy stream generators
+    // Step 1: Spawn dummy LSL stream generators for testing
+    log_with_time("📡 Starting LSL dummy stream generators...", start_time);
+
     let mut emg_stream = Command::new("./target/debug/lsl-dummy-stream")
         .args([
             "--name",
@@ -55,7 +66,7 @@ fn main() -> Result<()> {
             "10",
         ])
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()?;
 
     let mut eeg_stream = Command::new("./target/debug/lsl-dummy-stream")
@@ -67,153 +78,130 @@ fn main() -> Result<()> {
             "--source-id",
             "EEG_5678",
             "--channels",
-            "64",
+            "16",
             "--sample-rate",
             "500",
             "--chunk-size",
             "5",
         ])
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()?;
 
-    // Spawn output readers for stream generators
-    let emg_stderr = emg_stream.stderr.take().unwrap();
-    let eeg_stderr = eeg_stream.stderr.take().unwrap();
-    let _emg_stream_thread =
-        spawn_output_reader(BufReader::new(emg_stderr), "EMG-STREAM", start_time);
-    let _eeg_stream_thread =
-        spawn_output_reader(BufReader::new(eeg_stderr), "EEG-STREAM", start_time);
+    log_with_time("  ✅ EMG stream: 8 channels @ 1000 Hz", start_time);
+    log_with_time("  ✅ EEG stream: 16 channels @ 500 Hz", start_time);
+    log_with_time("", start_time);
 
-    log_with_time("Waiting for streams to initialize...", start_time);
-    thread::sleep(Duration::from_secs(2));
+    log_with_time("⏳ Waiting for streams to initialize...", start_time);
+    thread::sleep(Duration::from_secs(3));
 
-    log_with_time("Spawning multiple LSL recorders...", start_time);
+    // Step 2: Spawn the lsl-multi-recorder with both streams
+    log_with_time("🎬 Spawning lsl-multi-recorder...", start_time);
 
-    // Spawn first recorder for EMG stream
-    let mut recorder1 = Command::new("./target/debug/lsl-recorder")
+    let multi_recorder_path = if cfg!(windows) {
+        ".\\target\\debug\\lsl-multi-recorder.exe"
+    } else {
+        "./target/debug/lsl-multi-recorder"
+    };
+
+    let mut multi_recorder = Command::new(multi_recorder_path)
         .args([
-            "--interactive",
-            "--source-id",
+            "--source-ids",
             "EMG_1234",
-            "--stream-name",
+            "EEG_5678",
+            "--stream-names",
             "EMG",
-            "-o",
-            "experiment",
+            "EEG",
+            "--output",
+            "demo_experiment",
             "--subject",
             "P001",
             "--session-id",
-            "session_001",
+            "demo_session_001",
             "--notes",
-            "Multi-stream recording demo with dummy streams",
+            "Multi-stream recording demo using lsl-multi-recorder tool",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Spawn second recorder for EEG stream
-    let mut recorder2 = Command::new("./target/debug/lsl-recorder")
-        .args([
-            "--interactive",
-            "--source-id",
-            "EEG_5678",
-            "--stream-name",
-            "EEG",
-            "-o",
-            "experiment",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    log_with_time("  ✅ Multi-recorder spawned successfully", start_time);
+    log_with_time("", start_time);
 
-    log_with_time("Both recorders spawned successfully", start_time);
+    // Get stdin handle for sending commands
+    let mut stdin = multi_recorder.stdin.take().unwrap();
 
-    // Get stdin handles for sending commands
-    let mut stdin1 = recorder1.stdin.take().unwrap();
-    let mut stdin2 = recorder2.stdin.take().unwrap();
+    // Spawn threads to read and display output from multi-recorder
+    let stdout = multi_recorder.stdout.take().unwrap();
+    let stderr = multi_recorder.stderr.take().unwrap();
 
-    // Spawn threads to read and display output from both recorders
-    let stdout1 = recorder1.stdout.take().unwrap();
-    let stderr1 = recorder1.stderr.take().unwrap();
-    let stdout2 = recorder2.stdout.take().unwrap();
-    let stderr2 = recorder2.stderr.take().unwrap();
+    let _stdout_thread = spawn_output_reader(BufReader::new(stdout), "MULTI-OUT", start_time);
+    let _stderr_thread = spawn_output_reader(BufReader::new(stderr), "MULTI-ERR", start_time);
 
-    let _stdout1_thread = spawn_output_reader(BufReader::new(stdout1), "EMG-OUT", start_time);
-    let _stderr1_thread = spawn_output_reader(BufReader::new(stderr1), "EMG-ERR", start_time);
-    let _stdout2_thread = spawn_output_reader(BufReader::new(stdout2), "EEG-OUT", start_time);
-    let _stderr2_thread = spawn_output_reader(BufReader::new(stderr2), "EEG-ERR", start_time);
-
-    // Synchronized control sequence - both recorders start and stop together
-    log_with_time(
-        "Sending START command to both recorders simultaneously...",
-        start_time,
-    );
-    writeln!(stdin1, "START")?;
-    writeln!(stdin2, "START")?;
-    log_with_time("  → START sent to both recorders", start_time);
-
-    log_with_time("Recording for 10 seconds...", start_time);
-    thread::sleep(Duration::from_secs(10));
-
-    log_with_time(
-        "Sending STOP command to both recorders simultaneously...",
-        start_time,
-    );
-    writeln!(stdin1, "STOP")?;
-    writeln!(stdin2, "STOP")?;
-    log_with_time("  → STOP sent to both recorders", start_time);
-
-    log_with_time("Waiting 2 seconds before cleanup...", start_time);
+    // Give the multi-recorder time to initialize both child recorders
     thread::sleep(Duration::from_secs(2));
 
-    log_with_time("Sending QUIT to both recorders...", start_time);
-    writeln!(stdin1, "QUIT")?;
-    writeln!(stdin2, "QUIT")?;
-    log_with_time("  → QUIT sent to both recorders", start_time);
+    // Step 3: Send synchronized START command
+    log_with_time("", start_time);
+    log_with_time("▶️  Sending START command...", start_time);
+    writeln!(stdin, "START")?;
+    stdin.flush()?;
 
-    // Wait for processes to finish
-    log_with_time("Waiting for processes to finish...", start_time);
-    let _ = recorder1.wait()?;
-    log_with_time("\trecorder1 finished", start_time);
-    let _ = recorder2.wait()?;
-    log_with_time("\trecorder2 finished", start_time);
+    log_with_time("⏱️  Recording for 10 seconds...", start_time);
+    thread::sleep(Duration::from_secs(10));
 
-    log_with_time("Stopping dummy stream generators...", start_time);
+    // Step 4: Send synchronized STOP command
+    log_with_time("", start_time);
+    log_with_time("⏸️  Sending STOP command...", start_time);
+    writeln!(stdin, "STOP")?;
+    stdin.flush()?;
+
+    log_with_time("⏳ Waiting for final flush...", start_time);
+    thread::sleep(Duration::from_secs(2));
+
+    // Step 5: Send QUIT command to terminate all recorders
+    log_with_time("", start_time);
+    log_with_time("🛑 Sending QUIT command...", start_time);
+    writeln!(stdin, "QUIT")?;
+    stdin.flush()?;
+
+    // Wait for multi-recorder to finish
+    log_with_time("⏳ Waiting for multi-recorder to finish...", start_time);
+    let status = multi_recorder.wait()?;
+    log_with_time(
+        &format!("  ✅ Multi-recorder finished (status: {})", status),
+        start_time,
+    );
+
+    // Cleanup: Stop dummy stream generators
+    log_with_time("", start_time);
+    log_with_time("🧹 Cleaning up dummy streams...", start_time);
     let _ = emg_stream.kill();
     let _ = eeg_stream.kill();
     let _ = emg_stream.wait();
     let _ = eeg_stream.wait();
 
-    log_with_time(
-        "All recorders and streams finished successfully",
-        start_time,
-    );
-
-    log_with_time("Files created with JSON metadata:", start_time);
-    log_with_time(
-        "\texperiment_EMG.h5 (8-channel EMG data @ 1000 Hz + metadata)",
-        start_time,
-    );
-    log_with_time(
-        "\texperiment_EEG.h5 (64-channel EEG data @ 500 Hz + metadata)",
-        start_time,
-    );
     log_with_time("", start_time);
-    log_with_time("JSON metadata includes:", start_time);
-    log_with_time(
-        "\tComplete LSL stream information (channels, rates, etc.)",
-        start_time,
-    );
-    log_with_time(
-        "\tFull recorder configuration (flush settings, timeouts, etc.)",
-        start_time,
-    );
-    log_with_time(
-        "\tExact recording timestamps and session metadata",
-        start_time,
-    );
+    log_with_time("🎉 Demo completed successfully!", start_time);
+    log_with_time("", start_time);
+    log_with_time("📁 Generated HDF5 files:", start_time);
+    log_with_time("  → demo_experiment_EMG.h5 (8-channel EMG data @ 1000 Hz)", start_time);
+    log_with_time("  → demo_experiment_EEG.h5 (16-channel EEG data @ 500 Hz)", start_time);
+    log_with_time("", start_time);
+    log_with_time("🔍 Inspect files with:", start_time);
+    log_with_time("  cargo run --bin lsl-inspect -- demo_experiment_EMG.h5", start_time);
+    log_with_time("  cargo run --bin lsl-inspect -- demo_experiment_EEG.h5", start_time);
+    log_with_time("", start_time);
+    log_with_time("🔗 Merge files with:", start_time);
+    log_with_time("  cargo run --bin lsl-merge -- demo_experiment_EMG.h5 demo_experiment_EEG.h5 -o merged_demo.h5", start_time);
+    log_with_time("", start_time);
+    log_with_time("✨ Key advantages of lsl-multi-recorder:", start_time);
+    log_with_time("  • Single command controls all recorders", start_time);
+    log_with_time("  • Synchronized start/stop timing", start_time);
+    log_with_time("  • Shared metadata across recordings", start_time);
+    log_with_time("  • Automatic process management", start_time);
+    log_with_time("  • Clean shutdown handling", start_time);
 
     Ok(())
 }
