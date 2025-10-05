@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(./target/debug/lsl-dummy-stream:*)",
+      "Bash(cargo run:*)",
+      "Bash(./target/debug/lsl-inspect:*)",
+      "Bash(timeout:*)",
+      "Bash(pkill:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
