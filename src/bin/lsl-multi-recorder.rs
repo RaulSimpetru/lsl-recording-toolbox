@@ -71,6 +71,12 @@ struct Args {
         help = "Custom stream names (must match source-ids count if provided)"
     )]
     stream_names: Option<Vec<String>>,
+
+    #[arg(
+        long,
+        help = "Path to lsl-recorder executable (defaults to ./target/debug/lsl-recorder[.exe])"
+    )]
+    recorder_path: Option<PathBuf>,
 }
 
 struct RecorderProcess {
@@ -205,11 +211,13 @@ fn main() -> Result<()> {
     );
 
     // Determine recorder executable path
-    let recorder_path = if cfg!(windows) {
-        ".\\target\\debug\\lsl-recorder.exe"
-    } else {
-        "./target/debug/lsl-recorder"
-    };
+    let recorder_path = args.recorder_path.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| {
+        if cfg!(windows) {
+            ".\\target\\debug\\lsl-recorder.exe".to_string()
+        } else {
+            "./target/debug/lsl-recorder".to_string()
+        }
+    });
 
     log_with_time("Spawning recorder processes...", start_time);
 
@@ -231,7 +239,7 @@ fn main() -> Result<()> {
             start_time,
         );
 
-        let mut recorder = spawn_recorder(source_id, &stream_name, &args, recorder_path)?;
+        let mut recorder = spawn_recorder(source_id, &stream_name, &args, &recorder_path)?;
 
         // Spawn output readers for this recorder
         let stdout = recorder
