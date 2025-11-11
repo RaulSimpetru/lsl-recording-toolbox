@@ -1,3 +1,3 @@
-pub mod hdf5;
-pub mod merger;
+pub mod zarr;
+// pub mod merger; // TODO: Rewrite for Zarr format
 pub mod sync;

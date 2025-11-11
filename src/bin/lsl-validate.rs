@@ -1,13 +1,16 @@
 use anyhow::Result;
-use hdf5::{types::VarLenUnicode, File};
-use ndarray::Array1;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::path::Path;
+use std::sync::Arc;
+use zarrs::array::Array;
+use zarrs::array_subset::ArraySubset;
+use zarrs::filesystem::FilesystemStore;
+use zarrs::storage::{ReadableStorageTraits, StoreKey};
 
 #[derive(Debug, Clone)]
 struct StreamData {
     name: String,
-    file_path: String,
+    store_path: String,
     timestamps: Vec<f64>,
     data_shape: (usize, usize), // (channels, samples)
     stream_info: Value,
@@ -23,14 +26,14 @@ struct StreamData {
 }
 
 impl StreamData {
-    fn new(name: String, file_path: String) -> Self {
+    fn new(name: String, store_path: String) -> Self {
         Self {
             name,
-            file_path,
+            store_path,
             timestamps: Vec::new(),
             data_shape: (0, 0),
-            stream_info: json!({}),
-            recorder_config: json!({}),
+            stream_info: serde_json::json!({}),
+            recorder_config: serde_json::json!({}),
             start_time: 0.0,
             end_time: 0.0,
             duration: 0.0,
@@ -54,79 +57,92 @@ struct SyncAnalysis {
     sync_threshold: f64, // Threshold for considering streams synchronized
 }
 
-fn load_hdf5_stream_data(file_path: &str) -> Result<Vec<StreamData>> {
-    let path = Path::new(file_path);
+fn load_zarr_stream_data(store_path: &str) -> Result<Vec<StreamData>> {
+    let path = Path::new(store_path);
     if !path.exists() {
-        return Err(anyhow::anyhow!("File not found: {}", file_path));
+        return Err(anyhow::anyhow!("Store not found: {}", store_path));
     }
 
-    let file = File::open(file_path)?;
+    let store = Arc::new(FilesystemStore::new(store_path)?);
     let mut streams = Vec::new();
 
-    if let Ok(streams_group) = file.group("streams") {
-        for stream_name in streams_group.member_names()? {
-            let mut stream_data = StreamData::new(stream_name.clone(), file_path.to_string());
+    // Find all streams in /streams/
+    let streams_dir = path.join("streams");
+    if !streams_dir.exists() || !streams_dir.is_dir() {
+        return Err(anyhow::anyhow!("No streams found in store"));
+    }
 
-            let stream_group = streams_group.group(&stream_name)?;
-
-            // Load timestamps
-            if let Ok(time_dataset) = stream_group.dataset("time") {
-                let timestamps_array: Array1<f64> = time_dataset.read_1d()?;
-                stream_data.timestamps = timestamps_array.to_vec();
-                stream_data.sample_count = stream_data.timestamps.len();
-
-                if !stream_data.timestamps.is_empty() {
-                    stream_data.start_time = stream_data.timestamps[0];
-                    stream_data.end_time = stream_data.timestamps[stream_data.timestamps.len() - 1];
-
-                    stream_data.duration = stream_data.end_time - stream_data.start_time;
-
-                    // Calculate actual sample rate
-                    if stream_data.sample_count > 1 {
-                        stream_data.actual_sample_rate =
-                            (stream_data.sample_count - 1) as f64 / stream_data.duration;
-                    }
-                }
-            }
-
-            // Load data shape
-            if let Ok(data_dataset) = stream_group.dataset("data") {
-                let shape = data_dataset.shape();
-                stream_data.data_shape = (shape[0], shape[1]); // (channels, samples)
-                stream_data.channel_count = shape[0];
-            }
-
-            // Parse JSON metadata
-            if let Ok(stream_info_raw) = stream_group.attr("stream_info_json") {
-                let stream_info_unicode: VarLenUnicode = stream_info_raw.read_scalar()?;
-                let stream_info_str = stream_info_unicode.to_string();
-                if let Ok(parsed) = serde_json::from_str::<Value>(&stream_info_str) {
-                    stream_data.stream_info = parsed.clone();
-
-                    // Extract key information
-                    if let Some(nominal_srate) =
-                        parsed.get("nominal_srate").and_then(|v| v.as_f64())
-                    {
-                        stream_data.nominal_sample_rate = nominal_srate;
-                    }
-                    if let Some(channel_format) =
-                        parsed.get("channel_format").and_then(|v| v.as_str())
-                    {
-                        stream_data.channel_format = channel_format.to_string();
-                    }
-                }
-            }
-
-            if let Ok(recorder_config_raw) = stream_group.attr("recorder_config_json") {
-                let recorder_config_unicode: VarLenUnicode = recorder_config_raw.read_scalar()?;
-                let recorder_config_str = recorder_config_unicode.to_string();
-                if let Ok(parsed) = serde_json::from_str::<Value>(&recorder_config_str) {
-                    stream_data.recorder_config = parsed;
-                }
-            }
-
-            streams.push(stream_data);
+    for entry in std::fs::read_dir(streams_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
         }
+
+        let stream_name = entry.file_name().to_string_lossy().to_string();
+        let mut stream_data = StreamData::new(stream_name.clone(), store_path.to_string());
+
+        let stream_path = format!("/streams/{}", stream_name);
+
+        // Load timestamps
+        let time_array_path = format!("{}/time", stream_path);
+        if let Ok(time_array) = Array::<FilesystemStore>::open(store.clone(), &time_array_path) {
+            let shape = time_array.shape();
+            stream_data.sample_count = shape[0] as usize;
+
+            if stream_data.sample_count > 0 {
+                // Read all timestamps
+                let time_subset = ArraySubset::new_with_ranges(&[0..shape[0]]);
+                let timestamps_ndarray = time_array.retrieve_array_subset_ndarray::<f64>(&time_subset)?;
+                stream_data.timestamps = timestamps_ndarray.into_raw_vec_and_offset().0;
+
+                stream_data.start_time = stream_data.timestamps[0];
+                stream_data.end_time = stream_data.timestamps[stream_data.timestamps.len() - 1];
+                stream_data.duration = stream_data.end_time - stream_data.start_time;
+
+                // Calculate actual sample rate
+                if stream_data.sample_count > 1 {
+                    stream_data.actual_sample_rate =
+                        (stream_data.sample_count - 1) as f64 / stream_data.duration;
+                }
+            }
+        }
+
+        // Load data shape
+        let data_array_path = format!("{}/data", stream_path);
+        if let Ok(data_array) = Array::<FilesystemStore>::open(store.clone(), &data_array_path) {
+            let shape = data_array.shape();
+            stream_data.data_shape = (shape[0] as usize, shape[1] as usize); // (channels, samples)
+            stream_data.channel_count = shape[0] as usize;
+
+            // Load attributes from data array
+            if let Ok(attrs) = read_attributes(&store, &data_array_path) {
+                if let Some(obj) = attrs.as_object() {
+                    // Extract stream_info
+                    if let Some(stream_info) = obj.get("stream_info") {
+                        stream_data.stream_info = stream_info.clone();
+
+                        // Extract key information
+                        if let Some(nominal_srate) =
+                            stream_info.get("nominal_srate").and_then(|v| v.as_f64())
+                        {
+                            stream_data.nominal_sample_rate = nominal_srate;
+                        }
+                        if let Some(channel_format) =
+                            stream_info.get("channel_format").and_then(|v| v.as_str())
+                        {
+                            stream_data.channel_format = channel_format.to_string();
+                        }
+                    }
+
+                    // Extract recorder_config
+                    if let Some(recorder_config) = obj.get("recorder_config") {
+                        stream_data.recorder_config = recorder_config.clone();
+                    }
+                }
+            }
+        }
+
+        streams.push(stream_data);
     }
 
     Ok(streams)
@@ -200,7 +216,7 @@ fn analyze_synchronization(streams: &[StreamData]) -> SyncAnalysis {
 
 fn print_stream_info(stream: &StreamData) {
     println!("Stream: {}", stream.name);
-    println!("\tFile:\t\t{}", stream.file_path);
+    println!("\tStore:\t\t{}", stream.store_path);
     println!(
         "\tData shape:\t{:?} (channels × samples)",
         stream.data_shape
@@ -380,7 +396,7 @@ fn print_summary(analysis: &SyncAnalysis) {
     println!("=======");
     println!("Total streams analyzed:\t{}", analysis.streams.len());
 
-    if analysis.streams.len() > 0 {
+    if !analysis.streams.is_empty() {
         let total_samples: usize = analysis.streams.iter().map(|s| s.sample_count).sum();
         let avg_duration = analysis.streams.iter().map(|s| s.duration).sum::<f64>()
             / analysis.streams.len() as f64;
@@ -416,7 +432,7 @@ fn print_summary(analysis: &SyncAnalysis) {
     }
 
     println!();
-    println!("Run 'cargo run --example multi_recorder' to generate test files");
+    println!("Run 'cargo run --example multi_recorder' to generate test stores");
 }
 
 fn main() -> Result<()> {
@@ -426,36 +442,36 @@ fn main() -> Result<()> {
     println!("==========================================");
     println!();
 
-    let test_files = if args.len() > 1 {
-        // Use command line arguments as file paths
+    let test_stores = if args.len() > 1 {
+        // Use command line arguments as store paths
         args[1..].to_vec()
     } else {
-        // Default to standard multi-recorder files
+        // Default to standard multi-recorder stores
         vec![
-            "experiment_EMG.h5".to_string(),
-            "experiment_EEG.h5".to_string(),
+            "experiment_EMG.zarr".to_string(),
+            "experiment_EEG.zarr".to_string(),
         ]
     };
 
     let mut all_streams = Vec::new();
-    let mut _found_files = 0;
+    let mut _found_stores = 0;
 
-    // Load data from all available files
-    for file_path in &test_files {
-        match load_hdf5_stream_data(file_path) {
+    // Load data from all available stores
+    for store_path in &test_stores {
+        match load_zarr_stream_data(store_path) {
             Ok(mut streams) => {
-                _found_files += 1;
-                println!("Loaded {} stream(s) from {}", streams.len(), file_path);
+                _found_stores += 1;
+                println!("Loaded {} stream(s) from {}", streams.len(), store_path);
                 all_streams.append(&mut streams);
             }
             Err(e) => {
-                println!("Could not load {}: {}", file_path, e);
+                println!("Could not load {}: {}", store_path, e);
             }
         }
     }
 
     if all_streams.is_empty() {
-        println!("No valid HDF5 files found!");
+        println!("No valid Zarr stores found!");
         println!("Make sure to run 'cargo run --example multi_recorder' first");
         return Ok(());
     }
@@ -477,4 +493,15 @@ fn main() -> Result<()> {
     print_summary(&analysis);
 
     Ok(())
+}
+
+/// Read attributes from a path's .zattrs file
+fn read_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<Value> {
+    let attrs_path = format!("{}/.zattrs", path.trim_end_matches('/'));
+    let attrs_key = StoreKey::new(&attrs_path)?;
+    let attrs_bytes = store
+        .get(&attrs_key)?
+        .ok_or_else(|| anyhow::anyhow!("Attributes not found at {}", attrs_path))?;
+    let attrs: Value = serde_json::from_slice(&attrs_bytes)?;
+    Ok(attrs)
 }

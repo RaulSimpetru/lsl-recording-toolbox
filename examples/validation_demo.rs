@@ -158,9 +158,9 @@ fn main() -> Result<()> {
 
     // Clean up existing files
     log_with_time("Cleaning up existing files", start_time);
-    let _ = std::fs::remove_file("validation_demo_EMG_EMG_DEMO.h5");
-    let _ = std::fs::remove_file("validation_demo_EEG_EEG_DEMO.h5");
-    let _ = std::fs::remove_file("validation_demo_merged.h5");
+    let _ = std::fs::remove_dir_all("validation_demo_EMG_EMG_DEMO.zarr");
+    let _ = std::fs::remove_dir_all("validation_demo_EEG_EEG_DEMO.zarr");
+    let _ = std::fs::remove_dir_all("validation_demo_merged.zarr");
 
     // Create synchronized streams
     log_with_time("Creating synchronized streams", start_time);
@@ -193,10 +193,10 @@ fn main() -> Result<()> {
     log_with_time("Merging files", start_time);
     let merge_result = Command::new("./target/debug/lsl-merge")
         .args([
-            "validation_demo_EMG_EMG_DEMO.h5",
-            "validation_demo_EEG_EEG_DEMO.h5",
+            "validation_demo_EMG_EMG_DEMO.zarr",
+            "validation_demo_EEG_EEG_DEMO.zarr",
             "-o",
-            "validation_demo_merged.h5",
+            "validation_demo_merged.zarr",
         ])
         .output()?;
 
@@ -207,16 +207,16 @@ fn main() -> Result<()> {
 
     log_with_time("\tMerge completed", start_time);
 
-    run_validation("validation_demo_merged.h5", "Demo validation", start_time)?;
+    run_validation("validation_demo_merged.zarr", "Demo validation", start_time)?;
 
     // Show results
     println!();
     log_with_time("Results:", start_time);
 
     for file in &[
-        "validation_demo_EMG_EMG_DEMO.h5",
-        "validation_demo_EEG_EEG_DEMO.h5",
-        "validation_demo_merged.h5",
+        "validation_demo_EMG_EMG_DEMO.zarr",
+        "validation_demo_EEG_EEG_DEMO.zarr",
+        "validation_demo_merged.zarr",
     ] {
         if std::path::Path::new(file).exists() {
             let metadata = std::fs::metadata(file)?;

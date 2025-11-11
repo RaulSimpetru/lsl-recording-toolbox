@@ -12,20 +12,20 @@ pub struct Args {
     #[arg(
         long,
         short = 'o',
-        help = "HDF5 experiment base file path (without extension)",
+        help = "Zarr experiment base path (without .zarr extension)",
         default_value = "experiment"
     )]
     pub output: PathBuf,
 
     #[arg(
         long,
-        help = "Stream name for HDF5 group (defaults to source-id if not specified)"
+        help = "Stream name for Zarr group (defaults to source-id if not specified)"
     )]
     pub stream_name: Option<String>,
 
     #[arg(
         long,
-        help = "Optional suffix for HDF5 file (defaults to stream name if not specified)"
+        help = "Optional suffix for Zarr store (defaults to stream name if not specified)"
     )]
     pub suffix: Option<String>,
 
@@ -58,13 +58,13 @@ pub struct Args {
     )]
     pub resolve_timeout: f64,
 
-    #[arg(long, help = "Subject identifier for HDF5 metadata")]
+    #[arg(long, help = "Subject identifier for metadata")]
     pub subject: Option<String>,
 
-    #[arg(long, help = "Session identifier for HDF5 metadata")]
+    #[arg(long, help = "Session identifier for metadata")]
     pub session_id: Option<String>,
 
-    #[arg(long, help = "Notes for HDF5 metadata")]
+    #[arg(long, help = "Notes for metadata")]
     pub notes: Option<String>,
 
     #[arg(
@@ -112,8 +112,11 @@ pub struct Args {
 }
 
 impl Args {
-    /// Get the HDF5 configuration tuple from the parsed arguments
-    pub fn hdf5_config(
+    /// Get the Zarr configuration tuple from the parsed arguments
+    /// Returns (store_path, stream_name, subject, session_id, notes)
+    /// Note: Multiple streams can now write to the same Zarr file concurrently
+    /// by using different stream_name values under /streams/{stream_name}/
+    pub fn zarr_config(
         &self,
     ) -> (
         PathBuf,
@@ -122,16 +125,12 @@ impl Args {
         Option<String>,
         Option<String>,
     ) {
-        let file_suffix = self
-            .suffix
-            .clone()
-            .or_else(|| self.stream_name.clone())
-            .unwrap_or_else(|| self.source_id.clone());
-
-        let hdf5_file_path = PathBuf::from(format!("{}_{}.h5", self.output.display(), file_suffix));
+        // Single Zarr file for all streams - concurrent writes are supported
+        // via stream-specific subgroups: /streams/{stream_name}/
+        let zarr_store_path = PathBuf::from(format!("{}.zarr", self.output.display()));
 
         (
-            hdf5_file_path,
+            zarr_store_path,
             self.stream_name
                 .clone()
                 .unwrap_or_else(|| self.source_id.clone()),

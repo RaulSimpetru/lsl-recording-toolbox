@@ -1,0 +1,3 @@
+[target.x86_64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-musl:latest"
+build-args = ["APT_PACKAGES=hdf5-tools libhdf5-dev pkg-config"]

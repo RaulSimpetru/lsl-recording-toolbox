@@ -1,45 +1,30 @@
 use anyhow::Result;
 use clap::Parser;
-use lsl_recorder::merger::{ConflictResolution, Hdf5Merger, MergerConfig, TimeReference};
+use ndarray::IxDyn;
+use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::Arc;
+use zarrs::array::Array;
+use zarrs::array_subset::ArraySubset;
+use zarrs::filesystem::FilesystemStore;
+use zarrs::group::GroupBuilder;
+use zarrs::storage::{ReadableStorageTraits, StoreKey, WritableStorageTraits};
 
 #[derive(Parser)]
 #[command(name = "lsl-merge")]
-#[command(about = "Merge multiple HDF5 files created by lsl-recorder into a single file")]
+#[command(about = "Merge multiple Zarr stores created by lsl-recorder into a single store")]
 struct Args {
-    /// Input HDF5 files to merge
-    #[arg(help = "HDF5 files to merge (e.g., experiment_EMG.h5 experiment_EEG.h5)")]
-    input_files: Vec<PathBuf>,
+    /// Input Zarr stores to merge
+    #[arg(help = "Zarr stores to merge (e.g., experiment_EMG.zarr experiment_EEG.zarr)")]
+    input_stores: Vec<PathBuf>,
 
     #[arg(
         short = 'o',
         long = "output",
-        help = "Output HDF5 file path",
-        default_value = "merged_experiment.h5"
+        help = "Output Zarr store path",
+        default_value = "merged_experiment.zarr"
     )]
     output: PathBuf,
-
-    #[arg(
-        long = "time-ref",
-        help = "Time reference strategy for alignment",
-        value_enum,
-        default_value = "common-start"
-    )]
-    time_reference: TimeReferenceArg,
-
-    #[arg(
-        long = "conflict",
-        help = "Strategy for resolving metadata conflicts",
-        value_enum,
-        default_value = "merge"
-    )]
-    conflict_resolution: ConflictResolutionArg,
-
-    #[arg(
-        long = "no-provenance",
-        help = "Don't preserve provenance information (source files, merge time)"
-    )]
-    no_provenance: bool,
 
     #[arg(
         short = 'v',
@@ -47,161 +32,246 @@ struct Args {
         help = "Verbose output with detailed progress information"
     )]
     verbose: bool,
-
-    #[arg(
-        long = "trim-start",
-        help = "Trim samples before the common start time (when all streams have data)"
-    )]
-    trim_start: bool,
-
-    #[arg(
-        long = "trim-end",
-        help = "Trim samples after the common end time (when any stream ends)"
-    )]
-    trim_end: bool,
-}
-
-#[derive(clap::ValueEnum, Clone, Debug)]
-enum TimeReferenceArg {
-    #[value(name = "first-stream")]
-    FirstStream,
-    #[value(name = "last-stream")]
-    LastStream,
-    #[value(name = "absolute-zero")]
-    AbsoluteZero,
-    #[value(name = "keep-original")]
-    KeepOriginal,
-    #[value(name = "common-start")]
-    CommonStart,
-}
-
-impl From<TimeReferenceArg> for TimeReference {
-    fn from(arg: TimeReferenceArg) -> Self {
-        match arg {
-            TimeReferenceArg::FirstStream => TimeReference::FirstStream,
-            TimeReferenceArg::LastStream => TimeReference::LastStream,
-            TimeReferenceArg::AbsoluteZero => TimeReference::AbsoluteZero,
-            TimeReferenceArg::KeepOriginal => TimeReference::KeepOriginal,
-            TimeReferenceArg::CommonStart => TimeReference::CommonStart,
-        }
-    }
-}
-
-#[derive(clap::ValueEnum, Clone, Debug)]
-enum ConflictResolutionArg {
-    #[value(name = "error")]
-    Error,
-    #[value(name = "use-first")]
-    UseFirst,
-    #[value(name = "use-last")]
-    UseLast,
-    #[value(name = "merge")]
-    Merge,
-}
-
-impl From<ConflictResolutionArg> for ConflictResolution {
-    fn from(arg: ConflictResolutionArg) -> Self {
-        match arg {
-            ConflictResolutionArg::Error => ConflictResolution::Error,
-            ConflictResolutionArg::UseFirst => ConflictResolution::UseFirst,
-            ConflictResolutionArg::UseLast => ConflictResolution::UseLast,
-            ConflictResolutionArg::Merge => ConflictResolution::Merge,
-        }
-    }
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    if args.input_files.is_empty() {
-        println!("Error: No input files specified");
+    if args.input_stores.is_empty() {
+        println!("Error: No input stores specified");
         return Ok(());
     }
 
-    println!("HDF5 Multi-Stream File Merger");
-    println!("=============================");
+    println!("Zarr Multi-Stream Store Merger");
+    println!("===============================");
     println!();
 
-    // Check if all input files exist
-    let mut missing_files = Vec::new();
-    for file in &args.input_files {
-        if !file.exists() {
-            missing_files.push(file.to_string_lossy().to_string());
+    // Check if all input stores exist
+    let mut missing_stores = Vec::new();
+    for store_path in &args.input_stores {
+        if !store_path.exists() {
+            missing_stores.push(store_path.to_string_lossy().to_string());
         }
     }
 
-    if !missing_files.is_empty() {
-        println!("Error: The following input files were not found:");
-        for file in missing_files {
-            println!("\t{}", file);
+    if !missing_stores.is_empty() {
+        println!("Error: The following input stores were not found:");
+        for store in missing_stores {
+            println!("\t{}", store);
         }
         println!();
         println!(
-            "Make sure to run 'cargo run --example multi_recorder' first to generate test files."
+            "Make sure to run 'cargo run --example multi_recorder' first to generate test stores."
         );
         return Ok(());
     }
 
-    // Create merger configuration
-    let config = MergerConfig {
-        output_file: args.output.to_string_lossy().to_string(),
-        time_reference: args.time_reference.into(),
-        conflict_resolution: args.conflict_resolution.into(),
-        preserve_provenance: !args.no_provenance,
-        trim_start: args.trim_start,
-        trim_end: args.trim_end,
-    };
-
     if args.verbose {
         println!("Configuration:");
-        println!("\tOutput file:\t\t{}", config.output_file);
-        println!("\tTime reference:\t\t{:?}", config.time_reference);
-        println!("\tConflict resolution:\t{:?}", config.conflict_resolution);
-        println!("\tPreserve provenance:\t{}", config.preserve_provenance);
-        println!("\tTrim start:\t\t{}", config.trim_start);
-        println!("\tTrim end:\t\t{}", config.trim_end);
+        println!("\tOutput store:\t{}", args.output.display());
+        println!("\tInput stores:\t{}", args.input_stores.len());
+        for (i, store_path) in args.input_stores.iter().enumerate() {
+            println!("\t\t[{}] {}", i + 1, store_path.display());
+        }
         println!();
     }
 
-    // Create merger and load all files
-    let mut merger = Hdf5Merger::new(config);
+    // Create output store
+    std::fs::create_dir_all(&args.output)?;
+    let output_store = Arc::new(FilesystemStore::new(&args.output)?);
 
-    for file_path in &args.input_files {
-        println!("Loading file:\t{}", file_path.display());
-        match merger.add_file(file_path) {
-            Ok(()) => println!("\tLoaded successfully"),
-            Err(e) => {
-                println!("\tFailed to load: {}", e);
-                continue;
+    // Initialize output store structure
+    println!("Creating output store structure...");
+    let root_group = GroupBuilder::new().build(output_store.clone(), "/")?;
+    root_group.store_metadata()?;
+
+    let streams_group = GroupBuilder::new().build(output_store.clone(), "/streams")?;
+    streams_group.store_metadata()?;
+
+    let sync_group = GroupBuilder::new().build(output_store.clone(), "/sync")?;
+    sync_group.store_metadata()?;
+
+    let meta_group = GroupBuilder::new().build(output_store.clone(), "/meta")?;
+    meta_group.store_metadata()?;
+
+    // Merge metadata from all input stores
+    let mut merged_meta = serde_json::Map::new();
+    let mut source_files = Vec::new();
+
+    for store_path in &args.input_stores {
+        source_files.push(store_path.to_string_lossy().to_string());
+
+        // Read and merge /meta/.zattrs
+        let input_store = Arc::new(FilesystemStore::new(store_path)?);
+        if let Ok(meta) = read_attributes(&input_store, "/meta") {
+            if let Some(obj) = meta.as_object() {
+                for (key, value) in obj {
+                    if !merged_meta.contains_key(key) {
+                        merged_meta.insert(key.clone(), value.clone());
+                    }
+                }
             }
         }
     }
 
+    // Add merge provenance
+    merged_meta.insert("merged_from".to_string(), json!(source_files));
+    merged_meta.insert(
+        "merged_at".to_string(),
+        json!(chrono::Utc::now().to_rfc3339()),
+    );
+
+    // Write merged metadata
+    write_attributes(&output_store, "/meta", &merged_meta)?;
+
+    // Process each input store and copy streams
+    for (store_idx, store_path) in args.input_stores.iter().enumerate() {
+        println!(
+            "Processing store [{}/{}]: {}",
+            store_idx + 1,
+            args.input_stores.len(),
+            store_path.display()
+        );
+
+        let input_store = Arc::new(FilesystemStore::new(store_path)?);
+
+        // Find all streams in /streams/
+        let streams_dir = store_path.join("streams");
+        if !streams_dir.exists() || !streams_dir.is_dir() {
+            println!("\tWarning: No streams found in this store");
+            continue;
+        }
+
+        for entry in std::fs::read_dir(streams_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+
+            let stream_name = entry.file_name().to_string_lossy().to_string();
+            println!("\tCopying stream: {}", stream_name);
+
+            copy_stream(&input_store, &output_store, &stream_name, args.verbose)?;
+        }
+    }
+
     println!();
+    println!("SUCCESS! Merge operation completed");
+    println!("Output store:\t{}", args.output.display());
+    println!();
+    println!("Next steps:");
+    println!("\tInspect:\tlsl-inspect {}", args.output.display());
 
-    // Show summary
-    if args.verbose {
-        println!("{}", merger.summary());
-        println!();
+    Ok(())
+}
+
+/// Copy a stream from input store to output store
+fn copy_stream(
+    input_store: &Arc<FilesystemStore>,
+    output_store: &Arc<FilesystemStore>,
+    stream_name: &str,
+    verbose: bool,
+) -> Result<()> {
+    let input_stream_path = format!("/streams/{}", stream_name);
+    let output_stream_path = format!("/streams/{}", stream_name);
+
+    // Create stream group in output
+    let stream_group = GroupBuilder::new().build(output_store.clone(), &output_stream_path)?;
+    stream_group.store_metadata()?;
+
+    // Copy data array
+    let input_data_path = format!("{}/data", input_stream_path);
+    let output_data_path = format!("{}/data", output_stream_path);
+
+    if let Ok(input_array) = Array::<FilesystemStore>::open(input_store.clone(), &input_data_path)
+    {
+        let shape = input_array.shape();
+        if verbose {
+            println!("\t\tCopying data array: shape {:?}", shape);
+        }
+
+        // Read all data from input
+        let data_subset = ArraySubset::new_with_ranges(&[0..shape[0], 0..shape[1]]);
+        let data = input_array.retrieve_array_subset_ndarray::<f64>(&data_subset)?;
+
+        // Create output array with same metadata
+        let output_array = input_array.builder().build(output_store.clone(), &output_data_path)?;
+        output_array.store_metadata()?;
+
+        // Write data
+        output_array.store_array_subset_ndarray::<f64, IxDyn>(&[0, 0], data)?;
+
+        // Copy attributes
+        if let Ok(attrs) = read_attributes(input_store, &input_data_path) {
+            if let Some(obj) = attrs.as_object() {
+                write_attributes(output_store, &output_data_path, obj)?;
+            }
+        }
     }
 
-    // Perform the merge
-    match merger.merge() {
-        Ok(()) => {
-            println!();
-            println!("SUCCESS! Merge operation completed");
-            println!("Output file:\t{}", args.output.display());
-            println!();
-            println!("Next steps:");
-            println!("\tValidate:\tlsl-validate {}", args.output.display());
-            println!("\tInspect:\tlsl-inspect {}", args.output.display());
+    // Copy time array
+    let input_time_path = format!("{}/time", input_stream_path);
+    let output_time_path = format!("{}/time", output_stream_path);
+
+    if let Ok(input_array) = Array::<FilesystemStore>::open(input_store.clone(), &input_time_path)
+    {
+        let shape = input_array.shape();
+        if verbose {
+            println!("\t\tCopying time array: shape {:?}", shape);
         }
-        Err(e) => {
-            println!();
-            println!("ERROR: Merge operation failed - {}", e);
-            return Err(e);
+
+        // Read all data from input
+        let time_subset = ArraySubset::new_with_ranges(&[0..shape[0]]);
+        let data = input_array.retrieve_array_subset_ndarray::<f64>(&time_subset)?;
+
+        // Create output array
+        let output_array = input_array.builder().build(output_store.clone(), &output_time_path)?;
+        output_array.store_metadata()?;
+
+        // Write data
+        output_array.store_array_subset_ndarray::<f64, IxDyn>(&[0], data)?;
+
+        // Copy attributes
+        if let Ok(attrs) = read_attributes(input_store, &input_time_path) {
+            if let Some(obj) = attrs.as_object() {
+                write_attributes(output_store, &output_time_path, obj)?;
+            }
         }
     }
 
+    Ok(())
+}
+
+/// Read attributes from a path's .zattrs file
+fn read_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<Value> {
+    let trimmed_path = path.trim_end_matches('/');
+    let attrs_path = if trimmed_path.is_empty() || trimmed_path == "/" {
+        ".zattrs".to_string()  // Root group
+    } else {
+        format!("{}/.zattrs", trimmed_path.trim_start_matches('/'))
+    };
+    let attrs_key = StoreKey::new(&attrs_path)?;
+    let attrs_bytes = store
+        .get(&attrs_key)?
+        .ok_or_else(|| anyhow::anyhow!("Attributes not found at {}", attrs_path))?;
+    let attrs: Value = serde_json::from_slice(&attrs_bytes)?;
+    Ok(attrs)
+}
+
+/// Write attributes to a path's .zattrs file
+fn write_attributes(
+    store: &Arc<FilesystemStore>,
+    path: &str,
+    attrs: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    let trimmed_path = path.trim_end_matches('/');
+    let attrs_path = if trimmed_path.is_empty() || trimmed_path == "/" {
+        ".zattrs".to_string()  // Root group
+    } else {
+        format!("{}/.zattrs", trimmed_path.trim_start_matches('/'))
+    };
+    let attrs_key = StoreKey::new(&attrs_path)?;
+    let attrs_json = serde_json::to_vec(&attrs)?;
+    store.set(&attrs_key, attrs_json.into())?;
     Ok(())
 }

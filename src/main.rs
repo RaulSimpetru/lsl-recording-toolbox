@@ -1,8 +1,8 @@
 mod cli;
 mod commands;
-mod hdf5;
+mod zarr;
 mod lsl;
-mod merger;
+// mod merger; // TODO: Rewrite for Zarr format
 
 use anyhow::Result;
 use clap::Parser;
@@ -31,8 +31,8 @@ async fn main() -> Result<()> {
     let recording = Arc::new(AtomicBool::new(auto_start));
     let quit = Arc::new(AtomicBool::new(false));
 
-    // Prepare HDF5 configuration using CLI module
-    let hdf5_config = Some(args.hdf5_config());
+    // Prepare Zarr configuration using CLI module
+    let zarr_config = Some(args.zarr_config());
 
     // Prepare flush configuration
     let flush_interval = Duration::from_secs_f64(args.flush_interval);
@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
         let recording_thread = {
             let recording = recording_clone;
             let quit = quit_clone;
-            let hdf5_config_clone = hdf5_config.clone();
+            let zarr_config_clone = zarr_config.clone();
             thread::spawn(move || {
                 let args_clone = args.clone();
                 if let Err(e) = record_lsl_stream(
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
                     recording,
                     quit,
                     quiet,
-                    hdf5_config_clone,
+                    zarr_config_clone,
                     flush_interval,
                     flush_buffer_size,
                     immediate_flush,
@@ -117,7 +117,7 @@ async fn main() -> Result<()> {
             recording,
             quit,
             args.quiet,
-            hdf5_config,
+            zarr_config,
             flush_interval,
             flush_buffer_size,
             immediate_flush,

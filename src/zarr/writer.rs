@@ -1,7 +1,11 @@
 use anyhow::Result;
-use hdf5::Dataset;
-use ndarray::{Array1, Array2};
+use fs2::FileExt;
+use ndarray::{Array1, Array2, Ix1, Ix2};
+use std::fs::File;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use zarrs::array::Array;
+use zarrs::filesystem::FilesystemStore;
 
 /// Enum to handle different LSL data types
 #[derive(Debug, Clone)]
@@ -27,10 +31,10 @@ impl SampleData {
     }
 }
 
-/// Structure to manage HDF5 writing with buffering
-pub struct Hdf5Writer {
-    data_dataset: Dataset,
-    time_dataset: Dataset,
+/// Structure to manage Zarr writing with buffering
+pub struct ZarrWriter {
+    data_array: Array<FilesystemStore>,
+    time_array: Array<FilesystemStore>,
     sample_buffer: Vec<SampleData>,
     time_buffer: Vec<f64>,
     buffer_size: usize,
@@ -44,22 +48,33 @@ pub struct Hdf5Writer {
     // Backpressure monitoring
     slow_flush_warnings: u32,
     last_flush_duration: Duration,
+    // File lock for coordinating metadata writes across concurrent processes
+    metadata_lock: File,
 }
 
-impl Hdf5Writer {
+impl ZarrWriter {
     pub fn new(
-        data_dataset: Dataset,
-        time_dataset: Dataset,
+        data_array: Array<FilesystemStore>,
+        time_array: Array<FilesystemStore>,
         buffer_size: usize,
         channel_format: lsl::ChannelFormat,
         flush_interval: Duration,
+        store_path: PathBuf,
     ) -> Result<Self> {
         // Set max buffer size to 10x normal buffer size to prevent memory bloat
         let max_buffer_size = (buffer_size * 10).max(1000);
-        let current_length = data_dataset.shape()[1]; // Second dimension is now time
+        let current_length = data_array.shape()[1] as usize; // Second dimension is samples
+
+        // Create metadata lock file for coordinating concurrent writes
+        let lock_path = store_path.join(".zarr_metadata.lock");
+        let metadata_lock = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(lock_path)?;
+
         Ok(Self {
-            data_dataset,
-            time_dataset,
+            data_array,
+            time_array,
             sample_buffer: Vec::new(),
             time_buffer: Vec::new(),
             buffer_size,
@@ -71,6 +86,7 @@ impl Hdf5Writer {
             temp_data_buffer: Vec::new(),
             slow_flush_warnings: 0,
             last_flush_duration: Duration::from_millis(0),
+            metadata_lock,
         })
     }
 
@@ -116,21 +132,25 @@ impl Hdf5Writer {
         let num_channels = self.sample_buffer[0].len();
         let new_length = self.current_length + num_samples;
 
-        // Resize datasets to accommodate new data
-        self.data_dataset.resize((num_channels, new_length))?;
-        self.time_dataset.resize(new_length)?;
+        // Resize arrays to accommodate new samples (zarrs does NOT auto-expand)
+        // Set shape but defer metadata write until after data is written
+        let new_data_shape = vec![num_channels as u64, new_length as u64];
+        self.data_array.set_shape(new_data_shape)?;
+
+        let new_time_shape = vec![new_length as u64];
+        self.time_array.set_shape(new_time_shape)?;
 
         // Prepare time as 1D array - move data to avoid clone
         let time_array = Array1::from_vec(std::mem::take(&mut self.time_buffer));
 
-        // Write data based on channel format using write_slice - reuse temp buffer
+        // Write data based on channel format using array subset
         macro_rules! write_samples {
             ($type:ty, $variant:ident) => {{
                 // Prepare flattened data buffer
                 self.temp_data_buffer.clear();
                 self.temp_data_buffer.reserve(num_channels * num_samples);
 
-                // Fill buffer in column-major order (channel-first layout for HDF5)
+                // Fill buffer in column-major order (channel-first layout for Zarr)
                 for channel in 0..num_channels {
                     for i in 0..num_samples {
                         if let SampleData::$variant(values) = &self.sample_buffer[i] {
@@ -145,8 +165,11 @@ impl Hdf5Writer {
                 let data_array =
                     Array2::<$type>::from_shape_vec((num_channels, num_samples), typed_data)?;
 
-                self.data_dataset
-                    .write_slice(&data_array, (.., self.current_length..new_length))?;
+                // Define start indices for writing
+                let start_indices = &[0u64, self.current_length as u64];
+
+                // Write to Zarr array
+                self.data_array.store_array_subset_ndarray::<$type, Ix2>(start_indices, data_array)?;
             }};
         }
 
@@ -158,21 +181,18 @@ impl Hdf5Writer {
             lsl::ChannelFormat::Int8 => write_samples!(i8, Int8),
             _ => {
                 return Err(anyhow::anyhow!(
-                    "String format not yet implemented for HDF5"
+                    "String format not yet implemented for Zarr"
                 ));
             }
         }
 
-        // Write time data to the specific slice
-        self.time_dataset
-            .write_slice(&time_array, self.current_length..new_length)?;
+        // Write time data starting at current_length
+        let time_start_indices = &[self.current_length as u64];
+        self.time_array.store_array_subset_ndarray::<f64, Ix1>(time_start_indices, time_array)?;
 
         self.current_length = new_length;
         self.sample_buffer.clear();
         self.time_buffer.clear();
-
-        // Flush datasets to ensure data is written to disk
-        self.data_dataset.file()?.flush()?;
 
         // Monitor flush performance and detect backpressure
         let flush_duration = flush_start.elapsed();
@@ -185,7 +205,7 @@ impl Hdf5Writer {
             if self.slow_flush_warnings <= 5 {
                 // Only warn first 5 times
                 println!(
-                    "Warning: Slow HDF5 flush detected:\t{:.1}ms for {} samples (warning {}/5)",
+                    "Warning: Slow Zarr flush detected:\t{:.1}ms for {} samples (warning {}/5)",
                     flush_duration.as_millis(),
                     num_samples,
                     self.slow_flush_warnings
@@ -195,12 +215,22 @@ impl Hdf5Writer {
 
         if self.slow_flush_warnings <= 5 {
             println!(
-                "HDF5: Wrote {} samples (total: {} samples, {:.1}ms flush)",
+                "Zarr: Wrote {} samples (total: {} samples, {:.1}ms flush)",
                 num_samples,
                 self.current_length,
                 flush_duration.as_millis()
             );
         }
+
+        // Persist metadata AFTER writing data with exclusive lock to prevent race conditions
+        self.metadata_lock.lock_exclusive()?;
+        let metadata_result = (|| -> Result<()> {
+            self.data_array.store_metadata()?;
+            self.time_array.store_metadata()?;
+            Ok(())
+        })();
+        self.metadata_lock.unlock()?;
+        metadata_result?;
 
         Ok(())
     }

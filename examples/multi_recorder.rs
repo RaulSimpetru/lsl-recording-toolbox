@@ -39,6 +39,7 @@ fn spawn_output_reader<R: BufRead + Send + 'static>(
 /// Benefits of using lsl-multi-recorder:
 /// - Single command to control all recorders
 /// - Synchronized start/stop timing across all streams
+/// - All streams write to a single shared Zarr file
 /// - Shared metadata (subject, session, notes) across all recordings
 /// - Automatic output labeling and process management
 /// - Clean shutdown of all child processes
@@ -139,8 +140,9 @@ fn main() -> Result<()> {
     let _stdout_thread = spawn_output_reader(BufReader::new(stdout), "MULTI-OUT", start_time);
     let _stderr_thread = spawn_output_reader(BufReader::new(stderr), "MULTI-ERR", start_time);
 
-    // Give the multi-recorder time to initialize both child recorders
-    thread::sleep(Duration::from_secs(2));
+    // Wait for child recorders to resolve streams and start command handlers
+    // Stream resolution can take 5+ seconds with retries, plus time for Zarr initialization
+    thread::sleep(Duration::from_secs(8));
 
     // Step 3: Send synchronized START command
     log_with_time("", start_time);
@@ -185,21 +187,22 @@ fn main() -> Result<()> {
     log_with_time("", start_time);
     log_with_time("🎉 Demo completed successfully!", start_time);
     log_with_time("", start_time);
-    log_with_time("📁 Generated HDF5 files:", start_time);
-    log_with_time("  → demo_experiment_EMG.h5 (8-channel EMG data @ 1000 Hz)", start_time);
-    log_with_time("  → demo_experiment_EEG.h5 (16-channel EEG data @ 500 Hz)", start_time);
+    log_with_time("📁 Generated Zarr file:", start_time);
+    log_with_time("  → demo_experiment.zarr", start_time);
+    log_with_time("    • /streams/EMG/ (8 channels @ 1000 Hz)", start_time);
+    log_with_time("    • /streams/EEG/ (16 channels @ 500 Hz)", start_time);
+    log_with_time("    • /meta/ (shared metadata: subject, session, notes)", start_time);
+    log_with_time("    • /sync/ (synchronization info)", start_time);
     log_with_time("", start_time);
-    log_with_time("🔍 Inspect files with:", start_time);
-    log_with_time("  cargo run --bin lsl-inspect -- demo_experiment_EMG.h5", start_time);
-    log_with_time("  cargo run --bin lsl-inspect -- demo_experiment_EEG.h5", start_time);
-    log_with_time("", start_time);
-    log_with_time("🔗 Merge files with:", start_time);
-    log_with_time("  cargo run --bin lsl-merge -- demo_experiment_EMG.h5 demo_experiment_EEG.h5 -o merged_demo.h5", start_time);
+    log_with_time("🔍 Inspect file with:", start_time);
+    log_with_time("  cargo run --bin lsl-inspect -- demo_experiment.zarr", start_time);
     log_with_time("", start_time);
     log_with_time("✨ Key advantages of lsl-multi-recorder:", start_time);
     log_with_time("  • Single command controls all recorders", start_time);
     log_with_time("  • Synchronized start/stop timing", start_time);
+    log_with_time("  • All streams in one Zarr file (no merge needed!)", start_time);
     log_with_time("  • Shared metadata across recordings", start_time);
+    log_with_time("  • Safe concurrent writes with file locking", start_time);
     log_with_time("  • Automatic process management", start_time);
     log_with_time("  • Clean shutdown handling", start_time);
 

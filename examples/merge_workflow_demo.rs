@@ -81,7 +81,7 @@ fn record_stream(
 ///
 /// Shows:
 /// - Recording multiple streams
-/// - Merging HDF5 files
+/// - Merging Zarr files
 /// - Validation of results
 fn main() -> Result<()> {
     let start_time = Instant::now();
@@ -93,9 +93,9 @@ fn main() -> Result<()> {
 
     // Clean up existing files
     log_with_time("Cleaning up existing files", start_time);
-    let _ = std::fs::remove_file("experiment_MERGE_EMG.h5");
-    let _ = std::fs::remove_file("experiment_MERGE_EEG.h5");
-    let _ = std::fs::remove_file("merged_demo.h5");
+    let _ = std::fs::remove_dir_all("experiment_MERGE_EMG.zarr");
+    let _ = std::fs::remove_dir_all("experiment_MERGE_EEG.zarr");
+    let _ = std::fs::remove_dir_all("merged_demo.zarr");
 
     // Step 1: Create test streams
     log_with_time("STEP 1: Creating test streams", start_time);
@@ -153,10 +153,10 @@ fn main() -> Result<()> {
 
     let merge_result = Command::new("./target/debug/lsl-merge")
         .args([
-            "experiment_MERGE_EMG.h5",
-            "experiment_MERGE_EEG.h5",
+            "experiment_MERGE_EMG.zarr",
+            "experiment_MERGE_EEG.zarr",
             "-o",
-            "merged_demo.h5",
+            "merged_demo.zarr",
         ])
         .output()?;
 
@@ -179,7 +179,7 @@ fn main() -> Result<()> {
     log_with_time("STEP 4: Validating merged file", start_time);
 
     let validation_result = Command::new("./target/debug/lsl-validate")
-        .arg("merged_demo.h5")
+        .arg("merged_demo.zarr")
         .output();
 
     match validation_result {
@@ -210,9 +210,9 @@ fn main() -> Result<()> {
     log_with_time("Results:", start_time);
 
     for file in &[
-        "experiment_MERGE_EMG.h5",
-        "experiment_MERGE_EEG.h5",
-        "merged_demo.h5",
+        "experiment_MERGE_EMG.zarr",
+        "experiment_MERGE_EEG.zarr",
+        "merged_demo.zarr",
     ] {
         if std::path::Path::new(file).exists() {
             let metadata = std::fs::metadata(file)?;

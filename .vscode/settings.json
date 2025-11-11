@@ -7,5 +7,6 @@
         {
             "path": "/home/oj98yqyk/code/Biosignal-Device-Interface"
         }
-    ]
+    ],
+    "python.analysis.autoImportCompletions": false
 } 

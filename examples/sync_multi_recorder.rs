@@ -201,12 +201,12 @@ fn main() -> Result<()> {
     log_with_time("🎉 Synchronized recording completed!", start_time);
     println!();
     log_with_time("📁 Generated files:", start_time);
-    log_with_time("  → synced_experiment_EMG.h5 (EMG stream data)", start_time);
-    log_with_time("  → synced_experiment_EEG.h5 (EEG stream data)", start_time);
+    log_with_time("  → synced_experiment_EMG.zarr (EMG stream data)", start_time);
+    log_with_time("  → synced_experiment_EEG.zarr (EEG stream data)", start_time);
     println!();
     log_with_time("🔍 Analysis commands:", start_time);
     log_with_time("  cargo run --example sync_validator", start_time);
-    log_with_time("  cargo run --example merge_hdf5 -- synced_experiment_*.h5 -o merged_synced.h5", start_time);
+    log_with_time("  cargo run --example merge_zarr -- synced_experiment_*.zarr -o merged_synced.zarr", start_time);
     println!();
     log_with_time("📊 Synchronization benefits:", start_time);
     log_with_time("  • Millisecond-precise start/stop coordination", start_time);

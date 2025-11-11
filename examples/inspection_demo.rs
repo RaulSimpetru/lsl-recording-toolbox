@@ -103,7 +103,7 @@ fn run_inspection(file_path: &str, description: &str, start_time: Instant) -> Re
     Ok(())
 }
 
-/// Demonstrates lsl-inspect usage for HDF5 file exploration.
+/// Demonstrates lsl-inspect usage for Zarr file exploration.
 ///
 /// Shows:
 /// - Basic file inspection
@@ -113,12 +113,12 @@ fn main() -> Result<()> {
 
     println!("LSL Inspection Demo");
     println!("==================");
-    println!("Demonstrates HDF5 file inspection and metadata exploration");
+    println!("Demonstrates Zarr file inspection and metadata exploration");
     println!();
 
     // Clean up existing files
     log_with_time("Cleaning up existing files", start_time);
-    let _ = std::fs::remove_file("experiment_DEMO_INSPECT.h5");
+    let _ = std::fs::remove_dir_all("experiment_DEMO_INSPECT.zarr");
 
     // Create and record a test stream
     log_with_time("Creating test stream", start_time);
@@ -139,7 +139,7 @@ fn main() -> Result<()> {
 
     if success {
         log_with_time("\tRecording completed", start_time);
-        run_inspection("experiment_DEMO_INSPECT.h5", "Demo recording", start_time)?;
+        run_inspection("experiment_DEMO_INSPECT.zarr", "Demo recording", start_time)?;
     }
 
     println!();

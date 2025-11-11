@@ -27,10 +27,10 @@ fn main() -> Result<()> {
     println!("Demonstrates auto-start, interactive, and metadata recording modes");
     println!();
 
-    // Clean up existing files
-    log_with_time("Cleaning up existing files", start_time);
-    let _ = std::fs::remove_file("experiment_DEMO_EMG.h5");
-    let _ = std::fs::remove_file("experiment_DEMO_EEG.h5");
+    // Clean up existing stores
+    log_with_time("Cleaning up existing stores", start_time);
+    let _ = std::fs::remove_dir_all("experiment_DEMO_EMG.zarr");
+    let _ = std::fs::remove_dir_all("experiment_DEMO_EEG.zarr");
 
     // Demo 1: Auto-start recording
     log_with_time("DEMO 1: Auto-start recording", start_time);
@@ -145,15 +145,11 @@ fn main() -> Result<()> {
     println!();
     log_with_time("Results:", start_time);
 
-    for file_name in &["experiment_DEMO_EMG.h5", "experiment_DEMO_EEG.h5"] {
-        if std::path::Path::new(file_name).exists() {
-            let metadata = std::fs::metadata(file_name)?;
-            log_with_time(
-                &format!("\t{} ({:.1} KB)", file_name, metadata.len() as f64 / 1024.0),
-                start_time,
-            );
+    for store_name in &["experiment_DEMO_EMG.zarr", "experiment_DEMO_EEG.zarr"] {
+        if std::path::Path::new(store_name).exists() {
+            log_with_time(&format!("\t{} (created)", store_name), start_time);
         } else {
-            log_with_time(&format!("\t{} (not created)", file_name), start_time);
+            log_with_time(&format!("\t{} (not created)", store_name), start_time);
         }
     }
 

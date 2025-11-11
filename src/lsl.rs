@@ -9,8 +9,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::cli::Args;
-use crate::hdf5::writer::Hdf5Writer;
-use crate::hdf5::{open_or_create_hdf5_file, setup_stream_group};
+use crate::zarr::writer::ZarrWriter;
+use crate::zarr::{open_or_create_zarr_store, setup_stream_arrays};
 
 /// Resolve LSL stream with retry logic and random delays to avoid race conditions
 pub fn resolve_lsl_stream_with_retry(
@@ -83,7 +83,7 @@ pub fn record_lsl_stream(
     recording: Arc<AtomicBool>,
     quit: Arc<AtomicBool>,
     quiet: bool,
-    hdf5_config: Option<(
+    zarr_config: Option<(
         PathBuf,
         String,
         Option<String>,
@@ -153,31 +153,38 @@ pub fn record_lsl_stream(
     ])
     .map_err(|e| anyhow::anyhow!("LSL error: {}", e))?;
 
-    // Initialize HDF5 writer if config is provided
-    let mut hdf5_writer =
-        if let Some((file_path, stream_name, subject, session_id, notes)) = hdf5_config {
+    // Initialize Zarr writer if config is provided
+    let mut zarr_writer =
+        if let Some((store_path, stream_name, subject, session_id, notes)) = zarr_config {
             if !quiet {
-                println!("Initializing HDF5 file: {:?}", file_path);
+                println!("Initializing Zarr store: {:?}", store_path);
                 println!("Stream group: {}", stream_name);
             }
 
-            let file = open_or_create_hdf5_file(
-                &file_path,
+            let store = open_or_create_zarr_store(
+                &store_path,
                 subject.as_deref(),
                 session_id.as_deref(),
                 notes.as_deref(),
             )?;
 
+            // Get LSL time correction for sync metadata
+            let time_correction = inl
+                .time_correction(lsl::FOREVER)
+                .map_err(|e| anyhow::anyhow!("LSL error getting time correction: {}", e))?;
+
             let channel_format = info.channel_format();
             let recording_start_time = chrono::Utc::now().to_rfc3339();
             let recorder_config_json =
                 recorder_args.to_recorder_config_json(Some(recording_start_time))?;
-            let (_group, data_dataset, time_dataset) = setup_stream_group(
-                &file,
+            let (data_array, time_array) = setup_stream_arrays(
+                &store,
                 &stream_name,
                 &info,
                 channel_format,
                 &recorder_config_json,
+                time_correction,
+                None, // first_timestamp will be updated after first sample
             )?;
 
             let buffer_size = if immediate_flush {
@@ -205,12 +212,13 @@ pub fn record_lsl_stream(
                 }
                 adaptive_size
             };
-            Some(Hdf5Writer::new(
-                data_dataset,
-                time_dataset,
+            Some(ZarrWriter::new(
+                data_array,
+                time_array,
                 buffer_size,
                 channel_format,
                 flush_interval,
+                store_path.clone(),
             )?)
         } else {
             None
@@ -266,7 +274,7 @@ pub fn record_lsl_stream(
                         .pull_sample_buf($buf, pull_timeout)
                         .map_err(|e| anyhow::anyhow!("LSL error: {}", e))?;
                     if ts != 0.0 {
-                        if let Some(ref mut writer) = hdf5_writer {
+                        if let Some(ref mut writer) = zarr_writer {
                             // Pass data by slice reference to avoid full clone
                             writer.$method(&$buf, ts);
                         }
@@ -288,7 +296,7 @@ pub fn record_lsl_stream(
                 sample_count += 1;
 
                 // Check if we should flush (buffer size or time-based)
-                if let Some(ref mut writer) = hdf5_writer {
+                if let Some(ref mut writer) = zarr_writer {
                     if writer.needs_flush() {
                         writer.flush()?;
                     }
@@ -297,7 +305,7 @@ pub fn record_lsl_stream(
                 // Memory monitoring report every 10 seconds
                 if let Some(ref mut last_report) = last_memory_report {
                     if last_report.elapsed() >= Duration::from_secs(10) {
-                        let buffer_samples = if let Some(ref writer) = hdf5_writer {
+                        let buffer_samples = if let Some(ref writer) = zarr_writer {
                             writer.buffer_sample_count()
                         } else {
                             0
@@ -307,7 +315,7 @@ pub fn record_lsl_stream(
                             "Memory status:\t{} samples recorded, {} buffered samples, buffer usage: {:.1}%",
                             sample_count,
                             buffer_samples,
-                            if let Some(ref writer) = hdf5_writer {
+                            if let Some(ref writer) = zarr_writer {
                                 (buffer_samples as f64 / writer.buffer_capacity() as f64) * 100.0
                             } else {
                                 0.0
@@ -325,7 +333,7 @@ pub fn record_lsl_stream(
     }
 
     // Final flush for any remaining samples
-    if let Some(ref mut writer) = hdf5_writer {
+    if let Some(ref mut writer) = zarr_writer {
         writer.flush()?;
     }
 

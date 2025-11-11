@@ -1,0 +1,369 @@
+pub mod writer;
+
+use anyhow::Result;
+use fs2::FileExt;
+use serde_json::json;
+use std::fs::OpenOptions;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zarrs::array::{Array, ArrayBuilder, DataType, FillValue};
+use zarrs::array::codec::{BloscCodec, BloscCompressionLevel, BloscCompressor, BloscShuffleMode};
+use zarrs::filesystem::FilesystemStore;
+use zarrs::group::GroupBuilder;
+use zarrs::storage::{StoreKey, ReadableStorageTraits};
+
+/// Initialize or open Zarr store with base structure, handling concurrent access
+pub fn open_or_create_zarr_store(
+    store_path: &Path,
+    subject: Option<&str>,
+    session_id: Option<&str>,
+    notes: Option<&str>,
+) -> Result<Arc<FilesystemStore>> {
+    println!("Writing to Zarr store: {:?}", store_path);
+
+    // Create the store directory if it doesn't exist
+    std::fs::create_dir_all(store_path)?;
+
+    // Create filesystem store
+    let store = Arc::new(FilesystemStore::new(store_path)?);
+
+    // Use file locking to coordinate concurrent access during initialization
+    let lock_path = store_path.join(".zarr_init.lock");
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path)?;
+
+    // Acquire exclusive lock for initialization
+    lock_file.lock_exclusive()?;
+
+    // Initialize base structure if needed (protected by lock)
+    for attempt in 0..2 {
+        match initialize_store_structure(&store, subject, session_id, notes) {
+            Ok(_) => {
+                // Release lock before returning
+                lock_file.unlock()?;
+                return Ok(store);
+            }
+            Err(e) => {
+                if attempt < 1 {
+                    eprintln!(
+                        "Warning: Failed to initialize Zarr store (attempt {}): {}",
+                        attempt + 1,
+                        e
+                    );
+                    std::thread::sleep(Duration::from_millis(10 + fastrand::u64(0..20)));
+                } else {
+                    // Release lock before returning error
+                    lock_file.unlock()?;
+                    return Err(anyhow::anyhow!(
+                        "Failed to initialize Zarr store after 2 attempts: {}",
+                        e
+                    ));
+                }
+            }
+        }
+    }
+
+    // Release lock before returning (shouldn't reach here, but for safety)
+    lock_file.unlock()?;
+    Ok(store)
+}
+
+/// Initialize Zarr store with base group structure and metadata
+fn initialize_store_structure(
+    store: &Arc<FilesystemStore>,
+    subject: Option<&str>,
+    session_id: Option<&str>,
+    notes: Option<&str>,
+) -> Result<()> {
+    // Create root group if it doesn't exist
+    if !group_exists(store, "/")? {
+        let root_group = GroupBuilder::new().build(store.clone(), "/")?;
+        root_group.store_metadata()?;
+    }
+
+    // Create base groups
+    create_group_if_not_exists(store, "/streams")?;
+    create_group_if_not_exists(store, "/sync")?;
+    create_group_if_not_exists(store, "/meta")?;
+
+    // Write global metadata only if it doesn't exist (idempotent - first process wins)
+    if !metadata_exists(store, "/meta")? {
+        // Set metadata on /meta group
+        let mut meta_attrs = serde_json::Map::new();
+
+        if let Some(subject) = subject {
+            meta_attrs.insert("subject".to_string(), json!(subject));
+        }
+        if let Some(session_id) = session_id {
+            meta_attrs.insert("session_id".to_string(), json!(session_id));
+        }
+        if let Some(notes) = notes {
+            meta_attrs.insert("notes".to_string(), json!(notes));
+        }
+
+        let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
+        meta_attrs.insert("start_time".to_string(), json!(start_time));
+        meta_attrs.insert("global_reference".to_string(), json!("LSL clock of recorder host"));
+
+        // Write metadata to /meta group using Group API
+        let mut meta_group = zarrs::group::Group::open(store.clone(), "/meta")?;
+        meta_group.attributes_mut().extend(meta_attrs);
+        meta_group.store_metadata()?;
+    }
+
+    Ok(())
+}
+
+/// Check if a Zarr group exists (Zarr v3 uses zarr.json with node_type)
+fn group_exists(store: &Arc<FilesystemStore>, path: &str) -> Result<bool> {
+    let trimmed_path = path.trim_end_matches('/');
+    let metadata_path = if trimmed_path.is_empty() || trimmed_path == "/" {
+        "zarr.json".to_string()  // Root group
+    } else {
+        format!("{}/zarr.json", trimmed_path.trim_start_matches('/'))
+    };
+    let metadata_key = StoreKey::new(&metadata_path)?;
+
+    match store.get(&metadata_key) {
+        Ok(Some(data)) => {
+            // Parse JSON and check node_type
+            let json: serde_json::Value = serde_json::from_slice(&data)?;
+            Ok(json.get("node_type").and_then(|v| v.as_str()) == Some("group"))
+        }
+        _ => Ok(false),
+    }
+}
+
+/// Check if metadata exists for a given path by checking zarr.json attributes
+fn metadata_exists(store: &Arc<FilesystemStore>, path: &str) -> Result<bool> {
+    let trimmed_path = path.trim_end_matches('/');
+    let metadata_path = if trimmed_path.is_empty() || trimmed_path == "/" {
+        "zarr.json".to_string()  // Root group
+    } else {
+        format!("{}/zarr.json", trimmed_path.trim_start_matches('/'))
+    };
+    let metadata_key = StoreKey::new(&metadata_path)?;
+
+    match store.get(&metadata_key) {
+        Ok(Some(data)) => {
+            // Parse JSON and check if attributes exist and are non-empty
+            let json: serde_json::Value = serde_json::from_slice(&data)?;
+            if let Some(attrs) = json.get("attributes").and_then(|v| v.as_object()) {
+                Ok(!attrs.is_empty())
+            } else {
+                Ok(false)
+            }
+        }
+        _ => Ok(false),
+    }
+}
+
+/// Create a Zarr group if it doesn't exist
+fn create_group_if_not_exists(store: &Arc<FilesystemStore>, path: &str) -> Result<()> {
+    let exists = group_exists(store, path)?;
+    eprintln!("DEBUG: group_exists('{}') = {}", path, exists);
+
+    if !exists {
+        eprintln!("DEBUG: Creating group at '{}'", path);
+        // Create the group with GroupBuilder
+        let group = GroupBuilder::new().build(store.clone(), path)?;
+        // Store metadata to persist the group
+        group.store_metadata()?;
+        eprintln!("DEBUG: Group created and metadata stored for '{}'", path);
+    }
+
+    Ok(())
+}
+
+
+/// Serialize LSL StreamInfo to JSON value
+fn serialize_stream_info(info: &lsl::StreamInfo) -> Result<serde_json::Value> {
+    let stream_info_json = json!({
+        "type": info.stream_type(),
+        "source_id": info.source_id(),
+        "hostname": info.hostname(),
+        "channel_count": info.channel_count(),
+        "nominal_srate": info.nominal_srate(),
+        "channel_format": format!("{:?}", info.channel_format()),
+        "created_at": info.created_at(),
+        "uid": info.uid(),
+        "session_id": info.session_id(),
+        "version": info.version()
+    });
+
+    Ok(stream_info_json)
+}
+
+/// Parse recorder config JSON string to serde_json::Value
+fn parse_recorder_config(recorder_config_json: &str) -> Result<serde_json::Value> {
+    let config: serde_json::Value = serde_json::from_str(recorder_config_json)?;
+    Ok(config)
+}
+
+/// Get dtype for Zarr array based on LSL channel format
+fn get_zarr_dtype(channel_format: lsl::ChannelFormat) -> Result<DataType> {
+    match channel_format {
+        lsl::ChannelFormat::Float32 => Ok(DataType::Float32),
+        lsl::ChannelFormat::Double64 => Ok(DataType::Float64),
+        lsl::ChannelFormat::Int32 => Ok(DataType::Int32),
+        lsl::ChannelFormat::Int16 => Ok(DataType::Int16),
+        lsl::ChannelFormat::Int8 => Ok(DataType::Int8),
+        _ => Err(anyhow::anyhow!(
+            "Unsupported channel format for Zarr: {:?}",
+            channel_format
+        )),
+    }
+}
+
+/// Setup stream arrays (data and time) in the Zarr store
+pub fn setup_stream_arrays(
+    store: &Arc<FilesystemStore>,
+    stream_name: &str,
+    info: &lsl::StreamInfo,
+    channel_format: lsl::ChannelFormat,
+    recorder_config_json: &str,
+    time_correction: f64,
+    first_timestamp: Option<f64>,
+) -> Result<(Array<FilesystemStore>, Array<FilesystemStore>)> {
+    // Ensure /streams group exists
+    create_group_if_not_exists(store, "/streams")?;
+
+    // Create stream group (use absolute path with /)
+    let stream_path = format!("/streams/{}", stream_name);
+    create_group_if_not_exists(store, &stream_path)?;
+
+    // Ensure /meta/<stream_name> and /sync/<stream_name> groups exist
+    let meta_path = format!("/meta/{}", stream_name);
+    create_group_if_not_exists(store, &meta_path)?;
+
+    let sync_path = format!("/sync/{}", stream_name);
+    create_group_if_not_exists(store, &sync_path)?;
+
+    // Write sync metadata to /sync/<stream_name> using Group API
+    let mut sync_attrs = serde_json::Map::new();
+    sync_attrs.insert("lsl_clock_offset".to_string(), json!(time_correction));
+    sync_attrs.insert("recording_host".to_string(), json!(hostname::get()
+        .unwrap_or_else(|_| std::ffi::OsString::from("unknown"))
+        .to_string_lossy()
+        .to_string()));
+    sync_attrs.insert("recorded_at".to_string(), json!(chrono::Utc::now().to_rfc3339()));
+    if let Some(first_ts) = first_timestamp {
+        sync_attrs.insert("first_timestamp".to_string(), json!(first_ts));
+    }
+    let mut sync_group = zarrs::group::Group::open(store.clone(), &sync_path)?;
+    sync_group.attributes_mut().extend(sync_attrs);
+    sync_group.store_metadata()?;
+
+    // Create or get data array (use absolute path with /)
+    let data_path = format!("{}/data", stream_path);
+    let data_array = if array_exists(store, &data_path)? {
+        Array::open(store.clone(), &data_path)?
+    } else {
+        let channels = info.channel_count() as usize;
+        let dtype = get_zarr_dtype(channel_format)?;
+
+        // Create Blosc codec with LZ4 compression
+        let compression_level = BloscCompressionLevel::try_from(5u8)
+            .map_err(|e| anyhow::anyhow!("Invalid compression level: {}", e))?;
+        let blosc_codec = Arc::new(BloscCodec::new(
+            BloscCompressor::LZ4,
+            compression_level,
+            None, // typesize (auto-detect)
+            BloscShuffleMode::NoShuffle,
+            None, // blocksize (auto-detect)
+        )?);
+
+        let array = ArrayBuilder::new(
+            vec![channels as u64, 0], // [channels, samples] - samples dimension is unlimited
+            vec![channels as u64, 100], // chunk size: [channels, 100 samples]
+            dtype,
+            FillValue::from(0.0f32),
+        )
+        .dimension_names(Some(vec![
+            Some("channels".to_string()),
+            Some("samples".to_string()),
+        ]))
+        .bytes_to_bytes_codecs(vec![blosc_codec])
+        .build(store.clone(), &data_path)?;
+
+        array.store_metadata()?;
+
+        // Store metadata in the stream group instead of on the array
+        let mut stream_group = zarrs::group::Group::open(store.clone(), &stream_path)?;
+        let mut stream_attrs = serde_json::Map::new();
+        stream_attrs.insert("stream_info".to_string(), serialize_stream_info(info)?);
+        stream_attrs.insert("recorder_config".to_string(), parse_recorder_config(recorder_config_json)?);
+        stream_group.attributes_mut().extend(stream_attrs);
+        stream_group.store_metadata()?;
+
+        // Also store in /meta/<stream_name> group
+        let meta_path = format!("/meta/{}", stream_name);
+        create_group_if_not_exists(store, &meta_path)?;
+
+        let mut meta_group = zarrs::group::Group::open(store.clone(), &meta_path)?;
+        let mut meta_attrs = serde_json::Map::new();
+        meta_attrs.insert("created_at".to_string(), json!(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64()));
+        meta_attrs.insert("stream_name".to_string(), json!(stream_name));
+        meta_attrs.insert("nominal_srate".to_string(), json!(info.nominal_srate()));
+        meta_group.attributes_mut().extend(meta_attrs);
+        meta_group.store_metadata()?;
+
+        array
+    };
+
+    // Create or get time array
+    let time_path = format!("{}/time", stream_path);
+    let time_array = if array_exists(store, &time_path)? {
+        Array::open(store.clone(), &time_path)?
+    } else {
+        // Create Blosc codec with LZ4 compression for time
+        let compression_level = BloscCompressionLevel::try_from(5u8)
+            .map_err(|e| anyhow::anyhow!("Invalid compression level: {}", e))?;
+        let blosc_codec = Arc::new(BloscCodec::new(
+            BloscCompressor::LZ4,
+            compression_level,
+            None, // typesize (auto-detect)
+            BloscShuffleMode::NoShuffle,
+            None, // blocksize (auto-detect)
+        )?);
+
+        let array = ArrayBuilder::new(
+            vec![0], // unlimited dimension
+            vec![100], // chunk size: 100 samples
+            DataType::Float64,
+            FillValue::from(0.0f64),
+        )
+        .dimension_names(Some(vec![Some("samples".to_string())]))
+        .bytes_to_bytes_codecs(vec![blosc_codec])
+        .build(store.clone(), &time_path)?;
+
+        array.store_metadata()?;
+
+        // Note: Array-level attributes are not set via API in zarr-rs
+        // Time array description is self-evident from the array name
+
+        array
+    };
+
+    Ok((data_array, time_array))
+}
+
+/// Check if a Zarr array exists (Zarr v3 uses zarr.json with node_type)
+fn array_exists(store: &Arc<FilesystemStore>, path: &str) -> Result<bool> {
+    let trimmed_path = path.trim_end_matches('/').trim_start_matches('/');
+    let metadata_path = format!("{}/zarr.json", trimmed_path);
+    let metadata_key = StoreKey::new(&metadata_path)?;
+
+    match store.get(&metadata_key) {
+        Ok(Some(data)) => {
+            // Parse JSON and check node_type
+            let json: serde_json::Value = serde_json::from_slice(&data)?;
+            Ok(json.get("node_type").and_then(|v| v.as_str()) == Some("array"))
+        }
+        _ => Ok(false),
+    }
+}
+

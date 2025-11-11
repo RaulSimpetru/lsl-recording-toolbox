@@ -21,18 +21,18 @@ struct Args {
     #[arg(
         long,
         short = 'o',
-        help = "HDF5 experiment base file path (without extension)",
+        help = "Zarr experiment base path (without .zarr extension)",
         default_value = "experiment"
     )]
     output: PathBuf,
 
-    #[arg(long, help = "Subject identifier for HDF5 metadata")]
+    #[arg(long, help = "Subject identifier for metadata")]
     subject: Option<String>,
 
-    #[arg(long, help = "Session identifier for HDF5 metadata")]
+    #[arg(long, help = "Session identifier for metadata")]
     session_id: Option<String>,
 
-    #[arg(long, help = "Notes for HDF5 metadata")]
+    #[arg(long, help = "Notes for metadata")]
     notes: Option<String>,
 
     #[arg(
@@ -222,7 +222,7 @@ fn main() -> Result<()> {
     log_with_time("Spawning recorder processes...", start_time);
 
     let mut recorders: Vec<RecorderProcess> = Vec::new();
-    let mut output_threads = Vec::new();
+    let mut output_threads: Vec<thread::JoinHandle<()>> = Vec::new();
 
     for (idx, source_id) in args.source_ids.iter().enumerate() {
         let stream_name = args
@@ -351,11 +351,14 @@ fn main() -> Result<()> {
 
     log_with_time("All recordings completed successfully", start_time);
     println!();
-    log_with_time("Generated HDF5 files:", start_time);
+
+    // All streams are now saved to a single Zarr file
+    let zarr_filename = format!("{}.zarr", args.output.display());
+    log_with_time(&format!("Generated Zarr store: {}", zarr_filename), start_time);
+    log_with_time("Recorded streams:", start_time);
 
     for recorder in &recorders {
-        let filename = format!("{}_{}.h5", args.output.display(), recorder.stream_name);
-        log_with_time(&format!("\t{}", filename), start_time);
+        log_with_time(&format!("\t/streams/{}/", recorder.stream_name), start_time);
     }
 
     Ok(())

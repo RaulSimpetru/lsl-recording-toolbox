@@ -1,21 +1,21 @@
 # LSL Recorder
 
-A professional Rust toolkit for recording, managing, and analyzing Lab Streaming Layer (LSL) data streams in HDF5 format.
+A professional Rust toolkit for recording, managing, and analyzing Lab Streaming Layer (LSL) data streams in Zarr format.
 
 ## Overview
 
-LSL Recorder provides a comprehensive suite of command-line tools for high-performance, synchronized recording of multiple LSL data streams. Designed for scientific research and real-time data acquisition, the toolkit supports hierarchical HDF5 storage, metadata management, and multi-stream synchronization with millisecond precision.
+LSL Recorder provides a comprehensive suite of command-line tools for high-performance, synchronized recording of multiple LSL data streams. Designed for scientific research and real-time data acquisition, the toolkit supports hierarchical Zarr storage, metadata management, and multi-stream synchronization with millisecond precision.
 
 ## Features
 
 - **Multi-Stream Recording**: Synchronized recording of multiple LSL streams with unified control
-- **HDF5 Format**: Industry-standard hierarchical data format optimized for scientific analysis
+- **Zarr Format**: Industry-standard cloud-optimized array storage format optimized for scientific analysis
 - **Interactive Control**: Real-time START/STOP/QUIT commands via stdin
 - **Metadata Management**: Subject, session, and experiment metadata stored with recordings
 - **Adaptive Buffering**: Automatic buffer sizing based on stream sample rates
-- **Concurrent Writing**: Multiple recorders can write to the same HDF5 file safely
+- **Concurrent Writing**: Multiple recorders can write to the same Zarr file safely
 - **Duration Analysis**: Automatic calculation and display of recording duration
-- **File Merging**: Combine multiple HDF5 files with configurable time alignment
+- **File Merging**: Combine multiple Zarr files with configurable time alignment
 - **Validation Tools**: Analyze synchronization quality and timing accuracy
 - **Professional Output**: Tab-delimited, emoji-free formatting suitable for scientific workflows
 
@@ -25,7 +25,7 @@ LSL Recorder provides a comprehensive suite of command-line tools for high-perfo
 
 - Rust toolchain (1.70+)
 - LSL library installed and accessible
-- HDF5 library (automatically handled by Cargo)
+- Zarr support via zarrs crate (automatically handled by Cargo)
 
 ### Build from Source
 
@@ -95,21 +95,21 @@ set PYLSL_LIB=C:\path\to\lsl.dll
 ### Inspect and Analyze
 
 ```bash
-# Inspect HDF5 file structure and metadata
-./target/release/lsl-inspect experiment_EMG.h5
+# Inspect Zarr file structure and metadata
+./target/release/lsl-inspect experiment_EMG.zarr
 
 # Merge multiple files
-./target/release/lsl-merge experiment_EMG.h5 experiment_EEG.h5 -o merged.h5
+./target/release/lsl-merge experiment_EMG.zarr experiment_EEG.zarr -o merged.zarr
 
 # Validate synchronization
-./target/release/lsl-validate merged.h5
+./target/release/lsl-validate merged.zarr
 ```
 
 ## Tools
 
 ### lsl-recorder
 
-Main recording tool for capturing single LSL streams to HDF5.
+Main recording tool for capturing single LSL streams to Zarr.
 
 **Features:**
 
@@ -162,7 +162,7 @@ Options:
 
 ### lsl-inspect
 
-Inspect HDF5 metadata, structure, and recording duration.
+Inspect Zarr metadata, structure, and recording duration.
 
 **Features:**
 
@@ -174,15 +174,15 @@ Inspect HDF5 metadata, structure, and recording duration.
 **Usage:**
 
 ```bash
-lsl-inspect <file.h5>
+lsl-inspect <file.zarr>
 ```
 
 **Example Output:**
 
 ```bash
-HDF5 Metadata Inspector
+Zarr Metadata Inspector
 =======================
-File: experiment_EMG.h5
+File: experiment_EMG.zarr
 
 GLOBAL METADATA:
  subject: P001
@@ -202,7 +202,7 @@ STREAMS:
 
 ### lsl-merge
 
-Merge multiple HDF5 files into a single synchronized file.
+Merge multiple Zarr files into a single synchronized file.
 
 **Features:**
 
@@ -214,7 +214,7 @@ Merge multiple HDF5 files into a single synchronized file.
 **Usage:**
 
 ```bash
-lsl-merge <file1.h5> <file2.h5> ... -o <output.h5> [OPTIONS]
+lsl-merge <file1.zarr> <file2.zarr> ... -o <output.zarr> [OPTIONS]
 
 Options:
   --time-ref <strategy>     Time alignment: common-start, first-stream,
@@ -228,12 +228,12 @@ Options:
 
 ### lsl-validate
 
-Analyze HDF5 files for synchronization quality and timing accuracy.
+Analyze Zarr files for synchronization quality and timing accuracy.
 
 **Usage:**
 
 ```bash
-lsl-validate <file.h5>
+lsl-validate <file.zarr>
 ```
 
 ### lsl-dummy-stream
@@ -254,44 +254,49 @@ Options:
   --chunk-size <n>          Samples per chunk (default: 18)
 ```
 
-## HDF5 File Structure
+## Zarr Store Structure
 
-LSL Recorder creates hierarchical HDF5 files optimized for scientific analysis:
+LSL Recorder creates hierarchical Zarr stores optimized for scientific analysis:
 
 ```bash
-experiment.h5
-├── /meta
-│   ├── subject            (string)
-│   ├── session_id         (string)
-│   ├── start_time         (float64, LSL timestamp)
-│   ├── notes              (string)
-│   └── global_reference   (string)
-│
-├── /streams
-│   ├── /EMG
-│   │   ├── data           [channels × samples] float32
-│   │   ├── time           [samples] float64 (LSL timestamps)
-│   │   └── attributes:
-│   │       ├── stream_info_json    (source_id, channel_count, etc.)
-│   │       └── recorder_config_json (flush settings, version, etc.)
-│   │
-│   └── /EEG
-│       ├── data           [channels × samples]
-│       ├── time           [samples]
-│       └── attributes...
-│
-└── /sync
-    └── attributes:
-        └── synchronization metadata
+experiment.zarr/
+├── .zgroup                    # Root group metadata
+├── meta/
+│   ├── .zgroup
+│   └── .zattrs               # Global metadata (subject, session_id, start_time, notes)
+├── streams/
+│   ├── .zgroup
+│   ├── EMG/
+│   │   ├── .zgroup
+│   │   ├── data/
+│   │   │   ├── .zarray       # Array metadata [channels × samples]
+│   │   │   ├── .zattrs       # stream_info, recorder_config (JSON)
+│   │   │   └── c/            # Compressed chunks
+│   │   │       ├── 0.0
+│   │   │       ├── 0.1
+│   │   │       └── ...
+│   │   └── time/
+│   │       ├── .zarray       # Array metadata [samples]
+│   │       ├── .zattrs       # Timestamp metadata
+│   │       └── c/            # Compressed chunks
+│   │           ├── 0
+│   │           ├── 1
+│   │           └── ...
+│   └── EEG/
+│       └── ... (similar structure)
+└── sync/
+    ├── .zgroup
+    └── .zattrs               # Synchronization metadata
 ```
 
 **Key Features:**
 
 - **Channels-first layout**: `data[channels, samples]` for efficient channel access
 - **Float64 timestamps**: Microsecond-precision LSL timestamps
-- **Chunked storage**: 1000-sample chunks optimized for sequential access
-- **JSON metadata**: Complete stream and recorder configuration in attributes
-- **Concurrent writes**: Thread-safe HDF5 access for multi-recorder scenarios
+- **Chunked storage**: 100-sample chunks with Blosc/LZ4 compression
+- **JSON metadata**: Complete stream and recorder configuration in .zattrs files
+- **Cloud-optimized**: Directory-based format compatible with cloud storage
+- **Concurrent writes**: Thread-safe Zarr access for multi-recorder scenarios
 
 ## Common Workflows
 
@@ -316,14 +321,14 @@ STOP         # Stop recording after desired duration
 QUIT         # Exit
 
 # 4. Inspect results
-lsl-inspect session_001_EMG.h5
-lsl-inspect session_001_EEG.h5
+lsl-inspect session_001_EMG.zarr
+lsl-inspect session_001_EEG.zarr
 
 # 5. Merge if needed
-lsl-merge session_001_EMG.h5 session_001_EEG.h5 -o session_001_merged.h5
+lsl-merge session_001_EMG.zarr session_001_EEG.zarr -o session_001_merged.zarr
 
 # 6. Validate synchronization
-lsl-validate session_001_merged.h5
+lsl-validate session_001_merged.zarr
 ```
 
 ### Automated Recording with Duration
@@ -407,8 +412,8 @@ lsl-recorder/
 │   ├── cli.rs               # CLI argument definitions
 │   ├── commands.rs          # Interactive command handler
 │   ├── lsl.rs               # LSL stream recording logic
-│   ├── hdf5/                # HDF5 writing and management
-│   ├── merger.rs            # HDF5 file merging
+│   ├── zarr/                # Zarr writing and management
+│   ├── merger.rs            # Zarr store merging (TODO: rewrite for Zarr)
 │   ├── sync.rs              # Synchronization coordination
 │   └── bin/                 # Additional toolkit binaries
 │       ├── lsl-multi-recorder.rs
