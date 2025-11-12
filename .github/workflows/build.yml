@@ -65,35 +65,39 @@ jobs:
     - name: Build
       run: cargo build --release --target ${{ matrix.target }}
 
-    - name: Create artifact directory
-      run: mkdir artifacts
-
-    - name: Copy binaries (Windows)
+    - name: Package binaries (Windows)
       if: matrix.os == 'windows-latest'
-      shell: cmd
+      shell: powershell
       run: |
-        copy target\${{ matrix.target }}\release\lsl-recorder.exe artifacts\lsl-recorder-${{ matrix.target }}.exe
-        copy target\${{ matrix.target }}\release\lsl-multi-recorder.exe artifacts\lsl-multi-recorder-${{ matrix.target }}.exe
-        copy target\${{ matrix.target }}\release\lsl-sync.exe artifacts\lsl-sync-${{ matrix.target }}.exe
-        copy target\${{ matrix.target }}\release\lsl-validate.exe artifacts\lsl-validate-${{ matrix.target }}.exe
-        copy target\${{ matrix.target }}\release\lsl-inspect.exe artifacts\lsl-inspect-${{ matrix.target }}.exe
-        copy target\${{ matrix.target }}\release\lsl-dummy-stream.exe artifacts\lsl-dummy-stream-${{ matrix.target }}.exe
+        $binaries = @(
+          "lsl-recorder.exe",
+          "lsl-multi-recorder.exe",
+          "lsl-sync.exe",
+          "lsl-validate.exe",
+          "lsl-inspect.exe",
+          "lsl-dummy-stream.exe"
+        )
+        $targetDir = "target\${{ matrix.target }}\release"
+        Compress-Archive -Path ($binaries | ForEach-Object { Join-Path $targetDir $_ }) -DestinationPath "lsl-recording-toolbox-${{ matrix.target }}.zip"
 
-    - name: Copy binaries (Unix)
+    - name: Package binaries (Unix)
       if: matrix.os != 'windows-latest'
       run: |
-        cp target/${{ matrix.target }}/release/lsl-recorder artifacts/lsl-recorder-${{ matrix.target }}
-        cp target/${{ matrix.target }}/release/lsl-multi-recorder artifacts/lsl-multi-recorder-${{ matrix.target }}
-        cp target/${{ matrix.target }}/release/lsl-sync artifacts/lsl-sync-${{ matrix.target }}
-        cp target/${{ matrix.target }}/release/lsl-validate artifacts/lsl-validate-${{ matrix.target }}
-        cp target/${{ matrix.target }}/release/lsl-inspect artifacts/lsl-inspect-${{ matrix.target }}
-        cp target/${{ matrix.target }}/release/lsl-dummy-stream artifacts/lsl-dummy-stream-${{ matrix.target }}
+        cd target/${{ matrix.target }}/release
+        zip ../../../lsl-recording-toolbox-${{ matrix.target }}.zip \
+          lsl-recorder \
+          lsl-multi-recorder \
+          lsl-sync \
+          lsl-validate \
+          lsl-inspect \
+          lsl-dummy-stream
+        cd ../../..
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: lsl-recording-toolbox-${{ matrix.target }}
-        path: artifacts/*
+        path: lsl-recording-toolbox-${{ matrix.target }}.zip
 
   docs:
     name: Build and Deploy Documentation
@@ -164,11 +168,6 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          **/lsl-recorder-*
-          **/lsl-multi-recorder-*
-          **/lsl-sync-*
-          **/lsl-validate-*
-          **/lsl-inspect-*
-          **/lsl-dummy-stream-*
+          **/lsl-recording-toolbox-*.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

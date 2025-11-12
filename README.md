@@ -391,15 +391,3 @@ lsl-recorder/
 ├── CLAUDE.md               # Detailed documentation
 └── README.md               # This file
 ```
-
-## License
-
-[Add license information here]
-
-## Contributing
-
-[Add contribution guidelines here]
-
-## Support
-
-For issues, questions, or contributions, please [add contact/repository information].
