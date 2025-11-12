@@ -1,3 +1,55 @@
+//! LSL Dummy Stream - Generate test LSL streams with sine wave data
+//!
+//! This tool generates configurable LSL streams with sine wave data for testing
+//! and development of recording pipelines.
+//!
+//! # Features
+//!
+//! - Generate sine wave test streams
+//! - Configurable channel count and sample rate
+//! - Customizable stream name, type, and source ID
+//! - Adjustable chunk size for streaming
+//! - Frequency range configuration per channel
+//! - Multiple data types supported (float32, float64, int32, etc.)
+//! - Verbose output mode
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Generate default test stream (100 channels, 10kHz EMG)
+//! lsl-dummy-stream
+//!
+//! # Custom EMG stream
+//! lsl-dummy-stream --name "TestEMG" \
+//!   --source-id "EMG_1234" \
+//!   --channels 8 \
+//!   --sample-rate 2000
+//!
+//! # Generate EEG stream
+//! lsl-dummy-stream --name "TestEEG" \
+//!   --type "EEG" \
+//!   --source-id "EEG_5678" \
+//!   --channels 64 \
+//!   --sample-rate 1000
+//!
+//! # Custom frequency range
+//! lsl-dummy-stream --name "TestSignal" \
+//!   --source-id "SIG_9999" \
+//!   --channels 4 \
+//!   --freq-range "5,20"
+//!
+//! # Verbose output
+//! lsl-dummy-stream --verbose
+//! ```
+//!
+//! # Signal Generation
+//!
+//! Generates sine waves with:
+//! - Each channel has a different frequency
+//! - Frequencies linearly spaced across specified range
+//! - Continuous phase-coherent output
+//! - Realistic timing and chunk delivery
+
 use anyhow::Result;
 use clap::Parser;
 use lsl::{Pushable, StreamInfo, StreamOutlet};
@@ -77,6 +129,8 @@ fn parse_freq_range(freq_range: &str) -> Result<(f64, f64)> {
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    lsl_recording_toolbox::display_license_notice("lsl-dummy-stream");
+
     // Parse frequency range
     let (min_freq, max_freq) = parse_freq_range(&args.freq_range)?;
 
@@ -141,57 +195,57 @@ fn main() -> Result<()> {
     let chunk_duration = Duration::from_secs_f64(args.chunk_size as f64 / args.sample_rate);
     let start_time = Instant::now();
 
+   macro_rules! generate_and_push_chunk {
+        ($ty:ty, $scale:expr, $convert:expr, $outlet:expr, $args:expr, 
+        $sample_count:expr, $frequencies:expr) => {{
+            let mut chunk: Vec<Vec<$ty>> = Vec::with_capacity($args.chunk_size as usize);
+
+            for sample_idx in 0..$args.chunk_size {
+                let sample_time = (($sample_count * $args.chunk_size as u64) + sample_idx as u64)
+                    as f64
+                    / $args.sample_rate;
+
+                let mut sample: Vec<$ty> = Vec::with_capacity($args.channels as usize);
+                for freq in &$frequencies {
+                    // Varying amplitude: 0.5 + 0.3 * sin(2π * 0.1 * freq * t)
+                    let amplitude =
+                        0.5 + 0.3 * (2.0 * std::f64::consts::PI * 0.1 * freq * sample_time).sin();
+                    let value_f64 = amplitude * (2.0 * std::f64::consts::PI * freq * sample_time).sin();
+                    let value = $convert(value_f64 * $scale);
+                    sample.push(value);
+                }
+                chunk.push(sample);
+            }
+
+            // Push chunk to LSL
+            $outlet.push_chunk(&chunk)?;
+        }};
+    }
+
+
     loop {
-        // Generate chunk based on data type
         match channel_format {
             lsl::ChannelFormat::Float32 => {
-                let mut chunk: Vec<Vec<f32>> = Vec::with_capacity(args.chunk_size as usize);
-
-                for sample_idx in 0..args.chunk_size {
-                    let sample_time = ((sample_count * args.chunk_size as u64) + sample_idx as u64)
-                        as f64
-                        / args.sample_rate;
-
-                    let mut sample: Vec<f32> = Vec::with_capacity(args.channels as usize);
-                    for freq in &frequencies {
-                        // Varying amplitude: 0.5 + 0.3 * sin(2π * 0.1 * freq * t)
-                        let amplitude = 0.5
-                            + 0.3 * (2.0 * std::f64::consts::PI * 0.1 * freq * sample_time).sin();
-                        let value = (amplitude
-                            * (2.0 * std::f64::consts::PI * freq * sample_time).sin())
-                            as f32;
-                        sample.push(value);
-                    }
-                    chunk.push(sample);
-                }
-
-                // Push chunk to LSL
-                outlet.push_chunk(&chunk)?;
+                generate_and_push_chunk!(
+                    f32,          // type
+                    1.0,          // scale
+                    |v| v as f32, // conversion
+                    outlet,
+                    args,
+                    sample_count,
+                    frequencies
+                );
             }
             lsl::ChannelFormat::Int16 => {
-                let mut chunk: Vec<Vec<i16>> = Vec::with_capacity(args.chunk_size as usize);
-
-                for sample_idx in 0..args.chunk_size {
-                    let sample_time = ((sample_count * args.chunk_size as u64) + sample_idx as u64)
-                        as f64
-                        / args.sample_rate;
-
-                    let mut sample: Vec<i16> = Vec::with_capacity(args.channels as usize);
-                    for freq in &frequencies {
-                        // Varying amplitude: 0.5 + 0.3 * sin(2π * 0.1 * freq * t)
-                        let amplitude = 0.5
-                            + 0.3 * (2.0 * std::f64::consts::PI * 0.1 * freq * sample_time).sin();
-                        let value_f64 =
-                            amplitude * (2.0 * std::f64::consts::PI * freq * sample_time).sin();
-                        // Scale to int16 range: [-32768, 32767]
-                        let value = (value_f64 * 32767.0) as i16;
-                        sample.push(value);
-                    }
-                    chunk.push(sample);
-                }
-
-                // Push chunk to LSL
-                outlet.push_chunk(&chunk)?;
+                generate_and_push_chunk!(
+                    i16,
+                    32767.0,
+                    |v| v as i16,
+                    outlet,
+                    args,
+                    sample_count,
+                    frequencies
+                );
             }
             _ => unreachable!("Only Float32 and Int16 are supported"),
         }
@@ -212,4 +266,5 @@ fn main() -> Result<()> {
         // Sleep for appropriate duration
         thread::sleep(chunk_duration);
     }
+
 }

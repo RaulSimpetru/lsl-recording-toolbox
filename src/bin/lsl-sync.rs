@@ -1,9 +1,77 @@
+//! LSL Sync - Post-processing timestamp synchronization tool
+//!
+//! This tool aligns timestamps across multiple streams in a Zarr recording,
+//! creating synchronized time arrays for multi-stream analysis.
+//!
+//! # Features
+//!
+//! - Align timestamps across multiple streams
+//! - Multiple alignment modes (common-start, first-stream, last-stream, absolute-zero)
+//! - Optional trimming to remove data outside common time window
+//! - Non-destructive: preserves original raw timestamps
+//! - Writes aligned timestamps to `/streams/<name>/aligned_time`
+//! - Stores alignment metadata in Zarr attributes
+//! - Supports any number of streams in a Zarr file
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Synchronize with default mode (common-start)
+//! lsl-sync experiment.zarr
+//!
+//! # Synchronize with trimming (removes data outside common window)
+//! lsl-sync experiment.zarr --trim-both
+//!
+//! # Use different alignment mode
+//! lsl-sync experiment.zarr --mode first-stream
+//! lsl-sync experiment.zarr --mode last-stream
+//! lsl-sync experiment.zarr --mode absolute-zero
+//!
+//! # Trim only start or end
+//! lsl-sync experiment.zarr --trim-start
+//! lsl-sync experiment.zarr --trim-end
+//! ```
+//!
+//! # Alignment Modes
+//!
+//! - `common-start` (recommended): Align to latest start time where ALL streams have data
+//! - `first-stream`: Align to earliest stream start (may have gaps)
+//! - `last-stream`: Align to latest stream start
+//! - `absolute-zero`: Align to t=0
+//!
+//! # Output
+//!
+//! For each stream:
+//! - Creates `/streams/<name>/aligned_time` array with synchronized timestamps
+//! - Stores metadata in `/streams/<name>/zarr.json`:
+//!   - `alignment_offset`: Time offset applied
+//!   - `trim_start_index`: Start index if trimmed
+//!   - `trim_end_index`: End index if trimmed
+//!   - `original_sample_count`: Samples before trimming
+//!   - `aligned_sample_count`: Samples after trimming
+//!
+//! # Workflow
+//!
+//! ```bash
+//! # 1. Record multiple streams
+//! lsl-multi-recorder --source-ids "id1" "id2" --output experiment
+//!
+//! # 2. Synchronize timestamps
+//! lsl-sync experiment.zarr --mode common-start --trim-both
+//!
+//! # 3. Inspect results
+//! lsl-inspect experiment.zarr --verbose
+//!
+//! # 4. Validate synchronization
+//! lsl-validate experiment.zarr
+//! ```
+
 use anyhow::Result;
 use clap::Parser;
 use ndarray::{Array1, Ix1};
 use serde_json::json;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use zarrs::array::{Array, ArrayBuilder, DataType, FillValue};
 use zarrs::array::codec::{BloscCodec, BloscCompressionLevel, BloscCompressor, BloscShuffleMode};
@@ -46,6 +114,8 @@ struct StreamData {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    lsl_recording_toolbox::display_license_notice("lsl-sync");
 
     let trim_start = args.trim_start || args.trim_both;
     let trim_end = args.trim_end || args.trim_both;
@@ -99,16 +169,16 @@ fn main() -> Result<()> {
     // Write aligned timestamps and sync metadata
     println!("Writing synchronized data...");
     for stream in &streams {
-        write_aligned_timestamps(
-            &store,
-            &stream.name,
-            &stream.timestamps,
-            alignment_offsets.get(&stream.name).copied().unwrap_or(0.0),
+        write_aligned_timestamps(AlignmentParams {
+            store: &store,
+            stream_name: &stream.name,
+            timestamps: &stream.timestamps,
+            offset: alignment_offsets.get(&stream.name).copied().unwrap_or(0.0),
             common_start,
             common_end,
             trim_start,
             trim_end,
-        )?;
+        })?;
         println!("\tDone: {}", stream.name);
     }
     println!();
@@ -127,7 +197,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &PathBuf) -> Result<Vec<StreamData>> {
+fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &Path) -> Result<Vec<StreamData>> {
     let streams = Vec::new();
 
     // Read streams from /streams directory
@@ -151,7 +221,7 @@ fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &PathBuf) -> Result<Vec
 
         // For unlimited dimensions, shape may be 0 in metadata even if data exists
         // Find actual extent by counting chunks
-        let chunk_shape_opt = time_array.chunk_grid().chunk_shape(&vec![0])?;
+        let chunk_shape_opt = time_array.chunk_grid().chunk_shape(&[0])?;
         let chunk_shape = chunk_shape_opt
             .ok_or_else(|| anyhow::anyhow!("Failed to get chunk shape for {}", stream_name))?;
         let chunk_size = chunk_shape[0].get() as usize;
@@ -160,11 +230,9 @@ fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &PathBuf) -> Result<Vec
         let time_chunk_dir = zarr_path.join(format!("streams/{}/time/c", stream_name));
         let mut max_chunk = 0;
         if time_chunk_dir.exists() {
-            for entry in std::fs::read_dir(&time_chunk_dir)? {
-                if let Ok(entry) = entry {
-                    if let Ok(chunk_idx) = entry.file_name().to_string_lossy().parse::<usize>() {
-                        max_chunk = max_chunk.max(chunk_idx);
-                    }
+            for entry in std::fs::read_dir(&time_chunk_dir)?.flatten() {
+                if let Ok(chunk_idx) = entry.file_name().to_string_lossy().parse::<usize>() {
+                    max_chunk = max_chunk.max(chunk_idx);
                 }
             }
         }
@@ -279,16 +347,28 @@ fn calculate_common_window(streams: &[StreamData], alignment_offsets: &HashMap<S
     (common_start, common_end)
 }
 
-fn write_aligned_timestamps(
-    store: &Arc<FilesystemStore>,
-    stream_name: &str,
-    timestamps: &[f64],
+struct AlignmentParams<'a> {
+    store: &'a Arc<FilesystemStore>,
+    stream_name: &'a str,
+    timestamps: &'a [f64],
     offset: f64,
     common_start: f64,
     common_end: f64,
     trim_start: bool,
     trim_end: bool,
-) -> Result<()> {
+}
+
+fn write_aligned_timestamps(params: AlignmentParams) -> Result<()> {
+    let AlignmentParams {
+        store,
+        stream_name,
+        timestamps,
+        offset,
+        common_start,
+        common_end,
+        trim_start,
+        trim_end,
+    } = params;
     // Shift timestamps to make common_start = t=0
     // Streams that started before common_start will have negative timestamps
     let aligned_timestamps: Vec<f64> = timestamps

@@ -1,3 +1,73 @@
+//! LSL Multi-Recorder - Unified controller for recording multiple LSL streams
+//!
+//! This tool provides synchronized control over multiple LSL stream recordings,
+//! broadcasting commands to all recorders and managing their lifecycle.
+//!
+//! # Features
+//!
+//! - Record multiple LSL streams simultaneously
+//! - Synchronized START/STOP/QUIT commands across all recorders
+//! - Single shared Zarr file for all streams
+//! - Millisecond-level synchronization of start/stop events
+//! - Shared metadata (subject, session, notes) across recordings
+//! - File locking prevents race conditions during concurrent writes
+//! - Professional tab-delimited output formatting
+//! - Labeled output from each child recorder
+//! - Process lifecycle management and clean shutdown
+//! - Cross-platform support (Windows/Linux/Mac)
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Record two streams interactively
+//! lsl-multi-recorder \
+//!   --source-ids "EMG_1234" "EEG_5678" \
+//!   --stream-names "EMG" "EEG" \
+//!   --output experiment \
+//!   --subject P001
+//!
+//! # With full metadata
+//! lsl-multi-recorder \
+//!   --source-ids "EMG_1234" "EEG_5678" "Markers_9999" \
+//!   --stream-names "EMG" "EEG" "Events" \
+//!   --output experiment \
+//!   --subject P001 \
+//!   --session-id session_001 \
+//!   --notes "Multi-modal recording session"
+//!
+//! # Custom flush settings
+//! lsl-multi-recorder \
+//!   --source-ids "id1" "id2" \
+//!   --output experiment \
+//!   --flush-interval 2.0
+//! ```
+//!
+//! # Interactive Commands
+//!
+//! After starting, use these commands:
+//! - `START` - Begin recording all streams
+//! - `STOP` - Stop recording all streams
+//! - `STOP_AFTER <seconds>` - Stop all streams after duration
+//! - `QUIT` - Terminate all recorders
+//!
+//! # Output Format
+//!
+//! All streams write to a single shared Zarr file:
+//! ```text
+//! experiment.zarr/
+//! ├── streams/
+//! │   ├── EMG/
+//! │   │   ├── data
+//! │   │   └── time
+//! │   ├── EEG/
+//! │   │   ├── data
+//! │   │   └── time
+//! │   └── Events/
+//! │       ├── events
+//! │       └── time
+//! └── meta/  (shared metadata)
+//! ```
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::io::{BufRead, BufReader, Write};
@@ -190,6 +260,10 @@ fn broadcast_command(recorders: &mut [RecorderProcess], command: &str) -> Result
 fn main() -> Result<()> {
     let args = Args::parse();
     let start_time = Instant::now();
+
+    if !args.quiet {
+        lsl_recording_toolbox::display_license_notice("lsl-multi-recorder");
+    }
 
     // Validate stream names if provided
     if let Some(ref names) = args.stream_names {

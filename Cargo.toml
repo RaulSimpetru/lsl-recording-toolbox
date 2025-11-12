@@ -1,7 +1,15 @@
 [package]
-name = "lsl-recorder"
+name = "lsl-recording-toolbox"
 version = "0.1.0"
 edition = "2021"
+description = "Comprehensive toolkit for recording Lab Streaming Layer (LSL) data streams to Zarr format with multi-stream synchronization"
+license = "GPL-3.0-or-later"
+authors = ["Raul C. Sîmpetru"]
+keywords = ["lsl", "zarr", "neuroscience", "data-acquisition", "recording"]
+categories = ["science", "command-line-utilities"]
+readme = "README.md"
+repository = "https://github.com/RaulSimpetru/lsl-recording-toolbox"
+homepage = "https://github.com/RaulSimpetru/lsl-recording-toolbox"
 
 [dependencies]
 lsl = {git = "https://github.com/labstreaminglayer/liblsl-rust.git", rev = "afa1d251674591c11ebc06070de60914b6dafccf"}
@@ -22,8 +30,8 @@ chrono = { version = "0.4", features = ["serde"] }
 hostname = "0.3"
 
 [[bin]]
-name = "lsl-merge"
-path = "src/bin/lsl-merge.rs"
+name = "lsl-recorder"
+path = "src/bin/lsl-recorder.rs"
 
 [[bin]]
 name = "lsl-validate"
@@ -44,27 +52,3 @@ path = "src/bin/lsl-multi-recorder.rs"
 [[bin]]
 name = "lsl-sync"
 path = "src/bin/lsl-sync.rs"
-
-[[example]]
-name = "multi_recorder"
-path = "examples/multi_recorder.rs"
-
-[[example]]
-name = "sync_multi_recorder"
-path = "examples/sync_multi_recorder.rs"
-
-[[example]]
-name = "basic_recording_demo"
-path = "examples/basic_recording_demo.rs"
-
-[[example]]
-name = "merge_workflow_demo"
-path = "examples/merge_workflow_demo.rs"
-
-[[example]]
-name = "validation_demo"
-path = "examples/validation_demo.rs"
-
-[[example]]
-name = "inspection_demo"
-path = "examples/inspection_demo.rs"

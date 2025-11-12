@@ -33,6 +33,7 @@ pub fn open_or_create_zarr_store(
     let lock_file = OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(false)
         .open(&lock_path)?;
 
     // Acquire exclusive lock for initialization
@@ -86,7 +87,6 @@ fn initialize_store_structure(
 
     // Create base groups
     create_group_if_not_exists(store, "/streams")?;
-    create_group_if_not_exists(store, "/sync")?;
     create_group_if_not_exists(store, "/meta")?;
 
     // Write global metadata only if it doesn't exist (idempotent - first process wins)
@@ -235,14 +235,11 @@ pub fn setup_stream_arrays(
     let stream_path = format!("/streams/{}", stream_name);
     create_group_if_not_exists(store, &stream_path)?;
 
-    // Ensure /meta/<stream_name> and /sync/<stream_name> groups exist
+    // Ensure /meta/<stream_name> group exists
     let meta_path = format!("/meta/{}", stream_name);
     create_group_if_not_exists(store, &meta_path)?;
 
-    let sync_path = format!("/sync/{}", stream_name);
-    create_group_if_not_exists(store, &sync_path)?;
-
-    // Write sync metadata to /sync/<stream_name> using Group API
+    // Prepare sync metadata (will be added to stream group attributes)
     let mut sync_attrs = serde_json::Map::new();
     sync_attrs.insert("lsl_clock_offset".to_string(), json!(time_correction));
     sync_attrs.insert("recording_host".to_string(), json!(hostname::get()
@@ -253,9 +250,6 @@ pub fn setup_stream_arrays(
     if let Some(first_ts) = first_timestamp {
         sync_attrs.insert("first_timestamp".to_string(), json!(first_ts));
     }
-    let mut sync_group = zarrs::group::Group::open(store.clone(), &sync_path)?;
-    sync_group.attributes_mut().extend(sync_attrs);
-    sync_group.store_metadata()?;
 
     // Create or get data array (use absolute path with /)
     let data_path = format!("{}/data", stream_path);
@@ -296,6 +290,8 @@ pub fn setup_stream_arrays(
         let mut stream_attrs = serde_json::Map::new();
         stream_attrs.insert("stream_info".to_string(), serialize_stream_info(info)?);
         stream_attrs.insert("recorder_config".to_string(), parse_recorder_config(recorder_config_json)?);
+        // Add sync metadata to stream attributes
+        stream_attrs.extend(sync_attrs);
         stream_group.attributes_mut().extend(stream_attrs);
         stream_group.store_metadata()?;
 

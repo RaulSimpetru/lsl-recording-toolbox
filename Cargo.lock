@@ -658,7 +658,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lsl-recorder"
+name = "lsl-recording-toolbox"
 version = "0.1.0"
 dependencies = [
  "anyhow",

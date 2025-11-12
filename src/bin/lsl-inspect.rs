@@ -1,6 +1,51 @@
+//! LSL Inspect - Zarr file inspection and metadata viewer
+//!
+//! This tool inspects Zarr files created by lsl-recorder and displays file structure,
+//! metadata, stream information, and recording duration.
+//!
+//! # Features
+//!
+//! - Display Zarr file structure and hierarchy
+//! - Show global metadata (subject, session, notes)
+//! - List all streams within a Zarr file
+//! - Display stream information (channels, sample rate, format, duration)
+//! - Filter by specific stream name(s)
+//! - Verbose mode for additional details
+//! - Clean hierarchical output with Unicode box drawing
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Inspect default file (experiment.zarr)
+//! lsl-inspect
+//!
+//! # Inspect specific file
+//! lsl-inspect recording.zarr
+//!
+//! # Verbose mode with additional metadata
+//! lsl-inspect experiment.zarr --verbose
+//!
+//! # Filter to specific stream(s)
+//! lsl-inspect experiment.zarr --stream EMG
+//! lsl-inspect experiment.zarr --stream EMG --stream EEG
+//! ```
+//!
+//! # Output Format
+//!
+//! Displays:
+//! - Global metadata (subject, session ID, start time, notes)
+//! - Stream list with names and key information
+//! - For each stream:
+//!   - Channel count and format
+//!   - Sample rate (nominal and actual)
+//!   - Recording duration
+//!   - Sample count
+//!   - Timestamp range
+//!   - (Verbose) Full stream info and recorder config
+
 use anyhow::Result;
 use clap::Parser;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 use zarrs::array::Array;
@@ -28,6 +73,8 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    lsl_recording_toolbox::display_license_notice("lsl-inspect");
 
     println!("╔════════════════════════════════════════════════════════════════╗");
     println!("║              LSL Zarr File Inspector                           ║");
@@ -169,9 +216,8 @@ fn main() -> Result<()> {
                     _ => {}
                 }
 
-                // Show attributes from /streams/<stream_name>/data/.zattrs
-                let data_attrs_path = format!("{}/data", stream_path);
-                if let Ok(attrs) = read_array_attributes(&store, &data_attrs_path) {
+                // Show attributes from /streams/<stream_name>/zarr.json (stream group attributes)
+                if let Ok(attrs) = read_group_attributes(&store, &stream_path) {
                     for (attr_name, parsed) in attrs.as_object().unwrap_or(&serde_json::Map::new()) {
                         if parsed.is_object() {
                             if attr_name == "stream_info" {
@@ -180,7 +226,7 @@ fn main() -> Result<()> {
                                     println!("{}├─ Source ID: {}", indent, source_id.as_str().unwrap_or(""));
                                 }
                                 if let Some(nominal_srate) = parsed.get("nominal_srate") {
-                                    println!("{}├─ Sample Rate: {} Hz", indent, nominal_srate);
+                                    println!("{}├─ Nominal rate: {} Hz", indent, nominal_srate);
                                 }
                                 if let Some(channel_format) = parsed.get("channel_format") {
                                     println!("{}├─ Format: {}", indent, channel_format.as_str().unwrap_or(""));
@@ -223,48 +269,27 @@ fn main() -> Result<()> {
         println!();
     }
 
-    // Inspect sync metadata from /sync/.zattrs (verbose mode only)
-    if args.verbose {
-        if let Ok(sync_attrs) = read_group_attributes(&store, "/sync") {
-            println!("🔒 SYNCHRONIZATION");
-            for (key, value) in sync_attrs.as_object().unwrap_or(&serde_json::Map::new()) {
-                if value.is_object() || value.is_array() {
-                    println!("  └─ {}: {}", key, serde_json::to_string_pretty(&value)?);
-                } else {
-                    println!("  └─ {}: {}", key, value);
-                }
-            }
-            println!();
-        }
-    }
-
     Ok(())
 }
 
-/// Read attributes from a group's .zattrs file
+/// Read attributes from a group's zarr.json file (Zarr v3 format)
 fn read_group_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<Value> {
-    let trimmed_path = path.trim_end_matches('/');
-    let attrs_path = if trimmed_path.is_empty() || trimmed_path == "/" {
-        ".zattrs".to_string()  // Root group
-    } else {
-        format!("{}/.zattrs", trimmed_path.trim_start_matches('/'))
-    };
-    let attrs_key = StoreKey::new(&attrs_path)?;
-    let attrs_bytes = store
-        .get(&attrs_key)?
-        .ok_or_else(|| anyhow::anyhow!("Attributes not found at {}", attrs_path))?;
-    let attrs: Value = serde_json::from_slice(&attrs_bytes)?;
-    Ok(attrs)
-}
-
-/// Read attributes from an array's .zattrs file
-fn read_array_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<Value> {
     let trimmed_path = path.trim_end_matches('/').trim_start_matches('/');
-    let attrs_path = format!("{}/.zattrs", trimmed_path);
-    let attrs_key = StoreKey::new(&attrs_path)?;
-    let attrs_bytes = store
-        .get(&attrs_key)?
-        .ok_or_else(|| anyhow::anyhow!("Attributes not found at {}", attrs_path))?;
-    let attrs: Value = serde_json::from_slice(&attrs_bytes)?;
-    Ok(attrs)
+    let zarr_json_path = if trimmed_path.is_empty() {
+        "zarr.json".to_string()
+    } else {
+        format!("{}/zarr.json", trimmed_path)
+    };
+    let zarr_key = StoreKey::new(&zarr_json_path)?;
+    let zarr_bytes = store
+        .get(&zarr_key)?
+        .ok_or_else(|| anyhow::anyhow!("Metadata not found at {}", zarr_json_path))?;
+    let zarr_metadata: Value = serde_json::from_slice(&zarr_bytes)?;
+
+    // Extract attributes from zarr.json structure
+    if let Some(attrs) = zarr_metadata.get("attributes") {
+        Ok(attrs.clone())
+    } else {
+        Ok(json!({}))
+    }
 }

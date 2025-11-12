@@ -27,7 +27,10 @@
       "mcp__serena__initial_instructions",
       "mcp__serena__check_onboarding_performed",
       "mcp__serena__onboarding",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(./target/release/lsl-inspect.exe:*)",
+      "Bash(./target/debug/lsl-validate.exe:*)",
+      "Bash(cargo doc:*)"
     ],
     "deny": [],
     "ask": []

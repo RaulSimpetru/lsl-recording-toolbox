@@ -1,3 +1,46 @@
+//! LSL Validate - Synchronization quality analyzer for Zarr recordings
+//!
+//! This tool analyzes Zarr files to validate timing accuracy, synchronization quality,
+//! and LSL timestamp consistency across multiple streams.
+//!
+//! # Features
+//!
+//! - Analyze timing accuracy and drift for each stream
+//! - Validate LSL timestamp consistency
+//! - Check synchronization quality across multiple streams
+//! - Detect timing gaps and discontinuities
+//! - Report sample rate accuracy
+//! - Calculate inter-stream timing offsets
+//! - Identify alignment quality metrics
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Validate default file (experiment.zarr)
+//! lsl-validate
+//!
+//! # Validate specific file
+//! lsl-validate recording.zarr
+//!
+//! # Typical workflow after synchronization
+//! lsl-sync experiment.zarr --mode common-start --trim-both
+//! lsl-validate experiment.zarr
+//! ```
+//!
+//! # Output Metrics
+//!
+//! For each stream:
+//! - Nominal vs. actual sample rate
+//! - Timing drift and jitter
+//! - Timestamp range and duration
+//! - Sample count and missing data
+//!
+//! For multi-stream recordings:
+//! - Inter-stream time offsets
+//! - Synchronization quality score
+//! - Common time window overlap
+//! - Alignment accuracy
+
 use anyhow::Result;
 use serde_json::Value;
 use std::path::Path;
@@ -91,6 +134,7 @@ fn load_zarr_stream_data(store_path: &str) -> Result<Vec<StreamData>> {
 
             if stream_data.sample_count > 0 {
                 // Read all timestamps
+                #[allow(clippy::single_range_in_vec_init)]
                 let time_subset = ArraySubset::new_with_ranges(&[0..shape[0]]);
                 let timestamps_ndarray = time_array.retrieve_array_subset_ndarray::<f64>(&time_subset)?;
                 stream_data.timestamps = timestamps_ndarray.into_raw_vec_and_offset().0;
@@ -113,31 +157,31 @@ fn load_zarr_stream_data(store_path: &str) -> Result<Vec<StreamData>> {
             let shape = data_array.shape();
             stream_data.data_shape = (shape[0] as usize, shape[1] as usize); // (channels, samples)
             stream_data.channel_count = shape[0] as usize;
+        }
 
-            // Load attributes from data array
-            if let Ok(attrs) = read_attributes(&store, &data_array_path) {
-                if let Some(obj) = attrs.as_object() {
-                    // Extract stream_info
-                    if let Some(stream_info) = obj.get("stream_info") {
-                        stream_data.stream_info = stream_info.clone();
+        // Load attributes from stream group (Zarr v3 format)
+        if let Ok(attrs) = read_attributes(&store, &stream_path) {
+            if let Some(obj) = attrs.as_object() {
+                // Extract stream_info
+                if let Some(stream_info) = obj.get("stream_info") {
+                    stream_data.stream_info = stream_info.clone();
 
-                        // Extract key information
-                        if let Some(nominal_srate) =
-                            stream_info.get("nominal_srate").and_then(|v| v.as_f64())
-                        {
-                            stream_data.nominal_sample_rate = nominal_srate;
-                        }
-                        if let Some(channel_format) =
-                            stream_info.get("channel_format").and_then(|v| v.as_str())
-                        {
-                            stream_data.channel_format = channel_format.to_string();
-                        }
+                    // Extract key information
+                    if let Some(nominal_srate) =
+                        stream_info.get("nominal_srate").and_then(|v| v.as_f64())
+                    {
+                        stream_data.nominal_sample_rate = nominal_srate;
                     }
-
-                    // Extract recorder_config
-                    if let Some(recorder_config) = obj.get("recorder_config") {
-                        stream_data.recorder_config = recorder_config.clone();
+                    if let Some(channel_format) =
+                        stream_info.get("channel_format").and_then(|v| v.as_str())
+                    {
+                        stream_data.channel_format = channel_format.to_string();
                     }
+                }
+
+                // Extract recorder_config
+                if let Some(recorder_config) = obj.get("recorder_config") {
+                    stream_data.recorder_config = recorder_config.clone();
                 }
             }
         }
@@ -355,9 +399,13 @@ fn print_sync_analysis(analysis: &SyncAnalysis) {
             let start_offset = ((stream.start_time - min_start) / total_duration * 50.0) as usize;
             let duration_bars = ((stream.duration / total_duration * 50.0) as usize).max(1);
 
-            let mut timeline = vec![' '; 50];
-            for i in start_offset..(start_offset + duration_bars).min(50) {
-                timeline[i] = '█';
+            let mut timeline = [' '; 50];
+            for item in timeline
+                .iter_mut()
+                .skip(start_offset)
+                .take(((start_offset + duration_bars).min(50)) - start_offset)
+            {
+                *item = '█';
             }
             let timeline_str: String = timeline.iter().collect();
             println!(
@@ -438,6 +486,8 @@ fn print_summary(analysis: &SyncAnalysis) {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
+    lsl_recording_toolbox::display_license_notice("lsl-validate");
+
     println!("LSL Multi-Stream Synchronization Validator");
     println!("==========================================");
     println!();
@@ -495,13 +545,24 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Read attributes from a path's .zattrs file
+/// Read attributes from a group's zarr.json file (Zarr v3 format)
 fn read_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<Value> {
-    let attrs_path = format!("{}/.zattrs", path.trim_end_matches('/'));
-    let attrs_key = StoreKey::new(&attrs_path)?;
-    let attrs_bytes = store
-        .get(&attrs_key)?
-        .ok_or_else(|| anyhow::anyhow!("Attributes not found at {}", attrs_path))?;
-    let attrs: Value = serde_json::from_slice(&attrs_bytes)?;
-    Ok(attrs)
+    let trimmed_path = path.trim_end_matches('/').trim_start_matches('/');
+    let zarr_json_path = if trimmed_path.is_empty() {
+        "zarr.json".to_string()
+    } else {
+        format!("{}/zarr.json", trimmed_path)
+    };
+    let zarr_key = StoreKey::new(&zarr_json_path)?;
+    let zarr_bytes = store
+        .get(&zarr_key)?
+        .ok_or_else(|| anyhow::anyhow!("Metadata not found at {}", zarr_json_path))?;
+    let zarr_metadata: Value = serde_json::from_slice(&zarr_bytes)?;
+
+    // Extract attributes from zarr.json structure
+    if let Some(attrs) = zarr_metadata.get("attributes") {
+        Ok(attrs.clone())
+    } else {
+        Ok(serde_json::json!({}))
+    }
 }

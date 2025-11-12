@@ -1,10 +1,10 @@
-# LSL Recorder
+# LSL Recording Toolbox
 
 A professional Rust toolkit for recording, managing, and analyzing Lab Streaming Layer (LSL) data streams in Zarr format.
 
 ## Overview
 
-LSL Recorder provides a comprehensive suite of command-line tools for high-performance, synchronized recording of multiple LSL data streams. Designed for scientific research and real-time data acquisition, the toolkit supports hierarchical Zarr storage, metadata management, and multi-stream synchronization with millisecond precision.
+The LSL Recording Toolbox provides a comprehensive suite of command-line tools for high-performance, synchronized recording of multiple LSL data streams. Designed for scientific research and real-time data acquisition, the toolkit supports hierarchical Zarr storage, metadata management, and multi-stream synchronization with millisecond precision.
 
 ## Features
 
@@ -32,7 +32,7 @@ LSL Recorder provides a comprehensive suite of command-line tools for high-perfo
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd lsl-recorder
+cd lsl-recording-toolbox
 
 # Build all tools
 cargo build --release
@@ -98,11 +98,8 @@ set PYLSL_LIB=C:\path\to\lsl.dll
 # Inspect Zarr file structure and metadata
 ./target/release/lsl-inspect experiment_EMG.zarr
 
-# Merge multiple files
-./target/release/lsl-merge experiment_EMG.zarr experiment_EEG.zarr -o merged.zarr
-
 # Validate synchronization
-./target/release/lsl-validate merged.zarr
+./target/release/lsl-validate experiment_EMG.zarr
 ```
 
 ## Tools
@@ -200,32 +197,6 @@ STREAMS:
    nominal_srate: 1000.0
 ```
 
-### lsl-merge
-
-Merge multiple Zarr files into a single synchronized file.
-
-**Features:**
-
-- Multiple time alignment strategies
-- Metadata conflict resolution
-- Provenance tracking
-- Optional trimming to common time ranges
-
-**Usage:**
-
-```bash
-lsl-merge <file1.zarr> <file2.zarr> ... -o <output.zarr> [OPTIONS]
-
-Options:
-  --time-ref <strategy>     Time alignment: common-start, first-stream,
-                           last-stream, absolute-zero, keep-original
-  --conflict <strategy>     Metadata conflicts: merge, use-first,
-                           use-last, error
-  --trim-start              Trim before common start time
-  --trim-end                Trim after common end time
-  --verbose                 Detailed progress information
-```
-
 ### lsl-validate
 
 Analyze Zarr files for synchronization quality and timing accuracy.
@@ -320,15 +291,11 @@ START        # Begin recording
 STOP         # Stop recording after desired duration
 QUIT         # Exit
 
-# 4. Inspect results
-lsl-inspect session_001_EMG.zarr
-lsl-inspect session_001_EEG.zarr
+# 4. Inspect results (all streams in single zarr file)
+lsl-inspect session_001.zarr
 
-# 5. Merge if needed
-lsl-merge session_001_EMG.zarr session_001_EEG.zarr -o session_001_merged.zarr
-
-# 6. Validate synchronization
-lsl-validate session_001_merged.zarr
+# 5. Validate synchronization
+lsl-validate session_001.zarr
 ```
 
 ### Automated Recording with Duration
@@ -413,11 +380,10 @@ lsl-recorder/
 │   ├── commands.rs          # Interactive command handler
 │   ├── lsl.rs               # LSL stream recording logic
 │   ├── zarr/                # Zarr writing and management
-│   ├── merger.rs            # Zarr store merging (TODO: rewrite for Zarr)
 │   ├── sync.rs              # Synchronization coordination
 │   └── bin/                 # Additional toolkit binaries
 │       ├── lsl-multi-recorder.rs
-│       ├── lsl-merge.rs
+│       ├── lsl-sync.rs
 │       ├── lsl-validate.rs
 │       ├── lsl-inspect.rs
 │       └── lsl-dummy-stream.rs

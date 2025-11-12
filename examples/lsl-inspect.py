@@ -41,7 +41,7 @@ else:
         print(f"After trim - data: {trimmed_data.shape}, time: {trimmed_time.shape}")
 
         for i in range(trimmed_data.shape[0]):
-            ax.plot(trimmed_time, trimmed_data[i, :] + i * 2, label=f"Channel {i}")
+            ax.plot(trimmed_time, trimmed_data[i, :] + i * 2, "o-", label=f"Channel {i}")
         ax.set_title(f"Data for stream: {stream_name}")
 
     plt.xlabel("Time (s)")

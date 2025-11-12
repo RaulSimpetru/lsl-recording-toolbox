@@ -29,6 +29,18 @@ impl SampleData {
             SampleData::String(v) => v.len(),
         }
     }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        match self {
+            SampleData::Float32(v) => v.is_empty(),
+            SampleData::Float64(v) => v.is_empty(),
+            SampleData::Int32(v) => v.is_empty(),
+            SampleData::Int16(v) => v.is_empty(),
+            SampleData::Int8(v) => v.is_empty(),
+            SampleData::String(v) => v.is_empty(),
+        }
+    }
 }
 
 /// Structure to manage Zarr writing with buffering
@@ -70,6 +82,7 @@ impl ZarrWriter {
         let metadata_lock = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(false)
             .open(lock_path)?;
 
         Ok(Self {

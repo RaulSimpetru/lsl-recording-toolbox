@@ -80,5 +80,5 @@ excluded_tools: []
 # (contrary to the memories, which are loaded on demand).
 initial_prompt: ""
 
-project_name: "lsl-recorder"
+project_name: "lsl-recording-toolbox"
 included_optional_tools: []

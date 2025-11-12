@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LSL Recorder is a Rust command-line tool for recording Lab Streaming Layer (LSL) data streams to disk in Zarr format. The project provides a dedicated control interface for managing recordings, with Zarr support for hierarchical multi-stream experiments.
+The LSL Recording Toolbox is a Rust toolkit for recording Lab Streaming Layer (LSL) data streams to disk in Zarr format. The project provides a collection of command-line tools for managing recordings, with Zarr support for hierarchical multi-stream experiments.
 
 ## LSL Toolkit Binaries
 
@@ -13,7 +13,6 @@ The project includes multiple binary tools that work together:
 - **`lsl-recorder`** - Main recording tool for capturing LSL streams to Zarr
 - **`lsl-multi-recorder`** - Unified controller for recording multiple LSL streams simultaneously with synchronized start/stop
 - **`lsl-sync`** - Post-processing tool to align timestamps across multiple streams in a Zarr file
-- **`lsl-merge`** - Merge multiple Zarr files into a single synchronized file
 - **`lsl-validate`** - Analyze Zarr files for synchronization quality and timing accuracy
 - **`lsl-inspect`** - Inspect Zarr metadata, structure, and recording duration
 - **`lsl-dummy-stream`** - Generate dummy LSL streams with sine wave data for testing
@@ -105,12 +104,6 @@ lsl-validate experiment.zarr
 - Clean hierarchical output with Unicode box drawing
 - Default file: `experiment.zarr`
 
-**lsl-merge:**
-- Merges multiple Zarr files into a single synchronized file
-- Useful for combining data from separate recording sessions
-- Preserves all stream data and metadata
-- Validates synchronization across streams
-
 **lsl-validate:**
 - Analyzes synchronization quality
 - Reports timing accuracy and drift
@@ -201,21 +194,22 @@ lsl-multi-recorder \
 - Professional output formatting with tab-delimited structure
 - Handles process lifecycle management and clean shutdown
 
-**Example Demo:**
-
-The `multi_recorder` example demonstrates how to use `lsl-multi-recorder` in a complete workflow:
+**Quick Demos:**
 
 ```bash
-# Build and run the example (spawns dummy streams, records them, and cleans up)
-cargo build
-cargo run --example multi_recorder
-```
+# Multi-stream recording
+cargo run --example multi_recorder              # Rust
+bash examples/unix/multi_recorder_demo.sh       # Linux/Mac
+examples\windows\multi_recorder_demo.bat        # Windows
 
-This example shows:
-- Spawning dummy LSL streams for testing
-- Using lsl-multi-recorder to control both streams
-- Sending synchronized START/STOP/QUIT commands
-- Clean shutdown and output verification
+# Inspect Zarr files
+bash examples/unix/inspect_demo.sh              # Linux/Mac
+examples\windows\inspect_demo.bat               # Windows
+
+# Synchronize timestamps
+bash examples/unix/sync_demo.sh                 # Linux/Mac
+examples\windows\sync_demo.bat                  # Windows
+```
 
 ### Development Environment
 
@@ -242,19 +236,21 @@ experiment.zarr
 │   │   ├── data           [N x C] float32   (samples × channels)
 │   │   ├── time           [N] float64       (LSL time stamps)
 │   │   ├── aligned_time   [N] float64       (synchronized timestamps, created by lsl-sync)
-│   │   └── zarr.json      (Zarr v3 metadata with attributes: stream_info, recorder_config, alignment_offset, trim indices)
+│   │   └── zarr.json      (Zarr v3 metadata with attributes: stream_info, recorder_config,
+│   │                       lsl_clock_offset, recording_host, recorded_at, first_timestamp,
+│   │                       alignment_offset, trim indices)
 │   │
 │   ├── /EEG
 │   │   ├── data           [N x C]
 │   │   ├── time           [N]
 │   │   ├── aligned_time   [N]
-│   │   └── zarr.json
+│   │   └── zarr.json      (same attributes as above)
 │   │
 │   ├── /Markers
 │   │   ├── events         [N] string        (marker labels)
 │   │   ├── time           [N]
 │   │   ├── aligned_time   [N]
-│   │   └── zarr.json
+│   │   └── zarr.json      (same attributes as above)
 │   │
 │   └── … (any other stream, e.g. Gaze, IMU, Video_timestamps)
 │
@@ -315,7 +311,6 @@ experiment.zarr
 - `src/bin/` - Additional toolkit binaries:
   - `lsl-multi-recorder.rs` - Multi-stream recording controller
   - `lsl-sync.rs` - Post-processing timestamp synchronization tool
-  - `lsl-merge.rs` - Zarr file merger
   - `lsl-validate.rs` - Synchronization validator
   - `lsl-inspect.rs` - Zarr metadata inspector
   - `lsl-dummy-stream.rs` - Test stream generator
@@ -323,8 +318,6 @@ experiment.zarr
 - `src/commands.rs` - Interactive command handler
 - `src/zarr/` - Zarr file writing and management
 - `src/lsl.rs` - LSL stream recording logic
-- `src/merger.rs` - Zarr file merging logic
-- `src/sync.rs` - Synchronization coordination
 - `examples/` - Example workflows and demos
 
 **Core Dependencies:**
@@ -383,11 +376,6 @@ These are pre-configured in `.vscode/settings.json` for the development environm
 - Opens Zarr file and reads `/meta` and `/streams` groups
 - Calculates recording duration from timestamp datasets: `duration = last_time - first_time`
 - Displays metadata, dataset shapes, and stream information
-
-**lsl-merge:**
-- Reads multiple Zarr files and combines streams into single file
-- Preserves all metadata and timestamps
-- Validates synchronization across merged streams
 
 **lsl-validate:**
 - Analyzes timestamp consistency and synchronization quality
