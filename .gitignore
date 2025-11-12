@@ -2,3 +2,6 @@ target/
 *.h5
 *.zarr
 .idea/
+.claude/
+.serena/
+CLAUDE.md
