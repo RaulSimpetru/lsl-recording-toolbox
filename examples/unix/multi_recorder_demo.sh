@@ -8,8 +8,8 @@ cargo build --release
 ./target/release/lsl-multi-recorder --help
 
 # Start dummy streams in background
-./target/release/lsl-dummy-stream --name TestEMG --source-id emg1 --channels 8 --sample-rate 1000 &
-./target/release/lsl-dummy-stream --name TestEEG --source-id eeg1 --channels 16 --sample-rate 500 &
+./target/release/lsl-dummy-stream --name TestEMG --source-id emg1 --channels 64 --sample-rate 2000 &
+./target/release/lsl-dummy-stream --name TestEEG --source-id eeg1 --channels 32 --sample-rate 500 &
 
 # Wait for streams to initialize
 sleep 3

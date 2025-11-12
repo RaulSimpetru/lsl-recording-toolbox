@@ -1,7 +1,7 @@
 import zarr
 import pathlib
 import matplotlib.pyplot as plt
-PATH = pathlib.Path(r"C:\Users\raulc\Research\projects\lsl_interfaces\lsl-recorder\demo_experiment.zarr")
+PATH = pathlib.Path(r"C:\Users\raulc\Research\projects\lsl_interfaces\lsl-recording-toolbox\demo_experiment.zarr")
 
 if not PATH.exists():
     raise FileNotFoundError(f"Zarr store not found at `{PATH}`")

@@ -156,9 +156,8 @@ pub fn display_license_notice(program_name: &str) {
 	};
 
 	println!("{} Copyright (C) {} Raul C. Sîmpetru", program_name, copyright_year);
-	println!("This program comes with ABSOLUTELY NO WARRANTY; for details see");
-	println!("https://www.gnu.org/licenses/gpl-3.0.html#license-text.");
-	println!("This is free software, and you are welcome to redistribute it");
-	println!("under certain conditions; for details see https://www.gnu.org/licenses/gpl-3.0.html#license-text.");
+	println!("This program comes with ABSOLUTELY NO WARRANTY.");
+	println!("For details see https://www.gnu.org/licenses/gpl-3.0.html#license-text.");
+	println!("This is free software, and you are welcome to redistribute it under certain conditions.");
 	println!();
 }

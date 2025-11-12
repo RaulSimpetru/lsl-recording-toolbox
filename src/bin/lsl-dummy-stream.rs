@@ -194,6 +194,7 @@ fn main() -> Result<()> {
     let mut sample_count = 0u64;
     let chunk_duration = Duration::from_secs_f64(args.chunk_size as f64 / args.sample_rate);
     let start_time = Instant::now();
+    let mut next_chunk_time = start_time;
 
    macro_rules! generate_and_push_chunk {
         ($ty:ty, $scale:expr, $convert:expr, $outlet:expr, $args:expr, 
@@ -253,18 +254,38 @@ fn main() -> Result<()> {
         if args.verbose && sample_count % 100 == 0 {
             let elapsed = start_time.elapsed().as_secs_f64();
             let samples_sent = (sample_count + 1) * args.chunk_size as u64;
+            let expected_samples = (elapsed * args.sample_rate) as u64;
+            let drift = samples_sent as i64 - expected_samples as i64;
             println!(
-                "Status: {} samples sent in {:.1}s (avg rate: {:.1} Hz)",
+                "Status: {} samples sent in {:.1}s (avg rate: {:.1} Hz, drift: {} samples)",
                 samples_sent,
                 elapsed,
-                samples_sent as f64 / elapsed
+                samples_sent as f64 / elapsed,
+                drift
             );
         }
 
         sample_count += 1;
 
-        // Sleep for appropriate duration
-        thread::sleep(chunk_duration);
+        // Calculate when the next chunk should be sent
+        next_chunk_time += chunk_duration;
+
+        // Sleep until close to the target time
+        let now = Instant::now();
+        if next_chunk_time > now {
+            let sleep_duration = next_chunk_time - now;
+
+            // If we need to sleep more than 1ms, use thread::sleep for most of it
+            if sleep_duration > Duration::from_millis(1) {
+                thread::sleep(sleep_duration - Duration::from_millis(1));
+            }
+
+            // Spin-wait for the remaining time for better accuracy
+            while Instant::now() < next_chunk_time {
+                std::hint::spin_loop();
+            }
+        }
+        // If we're already late, don't sleep at all (catch up)
     }
 
 }

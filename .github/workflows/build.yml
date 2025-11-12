@@ -1,0 +1,174 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [ created ]
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe_suffix: .exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            exe_suffix: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            exe_suffix: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            exe_suffix: ""
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Install Homebrew (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        echo "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin" >> $GITHUB_PATH
+        echo "HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew" >> $GITHUB_ENV
+
+    - name: Install build dependencies (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        brew install cmake pkg-config
+        # Fix C++ compilation issues for lsl-sys
+        if [[ "$RUNNER_OS" == "macOS" ]]; then
+          echo "CXXFLAGS=-std=c++14 -Wno-enum-constexpr-conversion" >> $GITHUB_ENV
+        fi
+        echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Create artifact directory
+      run: mkdir artifacts
+
+    - name: Copy binaries (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: cmd
+      run: |
+        copy target\${{ matrix.target }}\release\lsl-recorder.exe artifacts\lsl-recorder-${{ matrix.target }}.exe
+        copy target\${{ matrix.target }}\release\lsl-multi-recorder.exe artifacts\lsl-multi-recorder-${{ matrix.target }}.exe
+        copy target\${{ matrix.target }}\release\lsl-sync.exe artifacts\lsl-sync-${{ matrix.target }}.exe
+        copy target\${{ matrix.target }}\release\lsl-validate.exe artifacts\lsl-validate-${{ matrix.target }}.exe
+        copy target\${{ matrix.target }}\release\lsl-inspect.exe artifacts\lsl-inspect-${{ matrix.target }}.exe
+        copy target\${{ matrix.target }}\release\lsl-dummy-stream.exe artifacts\lsl-dummy-stream-${{ matrix.target }}.exe
+
+    - name: Copy binaries (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cp target/${{ matrix.target }}/release/lsl-recorder artifacts/lsl-recorder-${{ matrix.target }}
+        cp target/${{ matrix.target }}/release/lsl-multi-recorder artifacts/lsl-multi-recorder-${{ matrix.target }}
+        cp target/${{ matrix.target }}/release/lsl-sync artifacts/lsl-sync-${{ matrix.target }}
+        cp target/${{ matrix.target }}/release/lsl-validate artifacts/lsl-validate-${{ matrix.target }}
+        cp target/${{ matrix.target }}/release/lsl-inspect artifacts/lsl-inspect-${{ matrix.target }}
+        cp target/${{ matrix.target }}/release/lsl-dummy-stream artifacts/lsl-dummy-stream-${{ matrix.target }}
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: lsl-recording-toolbox-${{ matrix.target }}
+        path: artifacts/*
+
+  docs:
+    name: Build and Deploy Documentation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Homebrew
+      run: |
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        echo "/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin" >> $GITHUB_PATH
+        echo "HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew" >> $GITHUB_ENV
+
+    - name: Install build dependencies
+      run: |
+        brew install cmake pkg-config
+        echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-doc-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build documentation
+      run: cargo doc --no-deps --document-private-items
+
+    - name: Create redirect for GitHub Pages
+      run: |
+        echo '<meta http-equiv="refresh" content="0; url=lsl_recording_toolbox/">' > target/doc/index.html
+
+    - name: Setup Pages
+      uses: actions/configure-pages@v5
+
+    - name: Upload documentation
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: target/doc
+
+    - name: Deploy to GitHub Pages
+      uses: actions/deploy-pages@v4
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Upload to release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          **/lsl-recorder-*
+          **/lsl-multi-recorder-*
+          **/lsl-sync-*
+          **/lsl-validate-*
+          **/lsl-inspect-*
+          **/lsl-dummy-stream-*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

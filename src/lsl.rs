@@ -155,12 +155,12 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
             }
 
             let ts = match &mut sample_buffer {
-                SampleBuffer::Float32(ref mut buf) => pull_and_record!(buf, add_sample_slice_f32),
-                SampleBuffer::Float64(ref mut buf) => pull_and_record!(buf, add_sample_slice_f64),
-                SampleBuffer::Int32(ref mut buf) => pull_and_record!(buf, add_sample_slice_i32),
-                SampleBuffer::Int16(ref mut buf) => pull_and_record!(buf, add_sample_slice_i16),
-                SampleBuffer::Int8(ref mut buf) => pull_and_record!(buf, add_sample_slice_i8),
-                SampleBuffer::String(ref mut buf) => pull_and_record!(buf, add_sample_slice_string),
+                SampleBuffer::Float32(buf) => pull_and_record!(buf, add_sample_slice_f32),
+                SampleBuffer::Float64(buf) => pull_and_record!(buf, add_sample_slice_f64),
+                SampleBuffer::Int32(buf) => pull_and_record!(buf, add_sample_slice_i32),
+                SampleBuffer::Int16(buf) => pull_and_record!(buf, add_sample_slice_i16),
+                SampleBuffer::Int8(buf) => pull_and_record!(buf, add_sample_slice_i8),
+                SampleBuffer::String(buf) => pull_and_record!(buf, add_sample_slice_string),
             };
 
             if ts != 0.0 {
@@ -339,7 +339,7 @@ impl MemoryMonitor {
     ) {
         if let Some(ref mut last_report) = self.last_report {
             if last_report.elapsed() >= Duration::from_secs(10) {
-                let buffer_samples = if let Some(ref writer) = zarr_writer {
+                let buffer_samples = if let Some(writer) = zarr_writer {
                     writer.buffer_sample_count()
                 } else {
                     0
@@ -349,7 +349,7 @@ impl MemoryMonitor {
                     "Memory status:\t{} samples recorded, {} buffered samples, buffer usage: {:.1}%",
                     sample_count,
                     buffer_samples,
-                    if let Some(ref writer) = zarr_writer {
+                    if let Some(writer) = zarr_writer {
                         (buffer_samples as f64 / writer.buffer_capacity() as f64) * 100.0
                     } else {
                         0.0
