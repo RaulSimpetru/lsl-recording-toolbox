@@ -5,3 +5,4 @@ target/
 .claude/
 .serena/
 CLAUDE.md
+examples/lsl-inspect.py
