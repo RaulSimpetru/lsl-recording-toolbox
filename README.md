@@ -1,15 +1,15 @@
 # LSL Recording Toolbox
 
-A professional Rust toolkit for recording, managing, and analyzing Lab Streaming Layer (LSL) data streams in Zarr format.
+A Rust toolkit for recording, managing, and analyzing Lab Streaming Layer (LSL) data streams in Zarr format.
 
 ## Overview
 
-The LSL Recording Toolbox provides a comprehensive suite of command-line tools for high-performance, synchronized recording of multiple LSL data streams. Designed for scientific research and real-time data acquisition, the toolkit supports hierarchical Zarr storage, metadata management, and multi-stream synchronization with millisecond precision.
+The LSL Recording Toolbox provides a suite of command-line tools for synchronized recording of multiple LSL data streams. Designed for research and real-time data acquisition, the toolkit supports hierarchical Zarr storage, metadata management, and multi-stream synchronization with millisecond precision.
 
 ## Features
 
 - **Multi-Stream Recording**: Synchronized recording of multiple LSL streams with unified control
-- **Zarr Format**: Industry-standard cloud-optimized array storage format optimized for scientific analysis
+- **Zarr Format**: Array storage format optimized for scientific analysis
 - **Interactive Control**: Real-time START/STOP/QUIT commands via stdin
 - **Metadata Management**: Subject, session, and experiment metadata stored with recordings
 - **Adaptive Buffering**: Automatic buffer sizing based on stream sample rates
@@ -17,7 +17,6 @@ The LSL Recording Toolbox provides a comprehensive suite of command-line tools f
 - **Duration Analysis**: Automatic calculation and display of recording duration
 - **File Merging**: Combine multiple Zarr files with configurable time alignment
 - **Validation Tools**: Analyze synchronization quality and timing accuracy
-- **Professional Output**: Tab-delimited, emoji-free formatting suitable for scientific workflows
 
 ## Installation
 

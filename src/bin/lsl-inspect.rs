@@ -80,7 +80,7 @@ fn main() -> Result<()> {
     println!("║              LSL Zarr File Inspector                           ║");
     println!("╚════════════════════════════════════════════════════════════════╝");
     println!();
-    println!("📁 Store: {}", args.file_path);
+    println!("Store: {}", args.file_path);
     println!();
 
     let store = Arc::new(FilesystemStore::new(&args.file_path)?);
@@ -88,7 +88,7 @@ fn main() -> Result<()> {
     // Inspect global metadata from /meta/.zattrs
     match read_group_attributes(&store, "/meta") {
         Ok(meta_attrs) => {
-            println!("🌐 GLOBAL METADATA");
+            println!("GLOBAL METADATA");
             for (key, value) in meta_attrs.as_object().unwrap_or(&serde_json::Map::new()) {
                 let value_str = if value.is_string() {
                     value.as_str().unwrap_or("").to_string()
@@ -110,7 +110,7 @@ fn main() -> Result<()> {
         }
         Err(e) => {
             if args.verbose {
-                println!("⚠️  No global metadata found: {}", e);
+                println!("WARNING: No global metadata found: {}", e);
                 println!();
             }
         }
@@ -129,7 +129,7 @@ fn main() -> Result<()> {
             }
         }
 
-        println!("📊 STREAMS ({} found)", stream_count);
+        println!("STREAMS ({} found)", stream_count);
         println!();
 
         let mut stream_idx = 0;
@@ -169,7 +169,7 @@ fn main() -> Result<()> {
                         }
                     }
                     Err(e) if args.verbose => {
-                        println!("{}├─ ⚠️  Could not open data array at '{}': {}", indent, data_array_path, e);
+                        println!("{}├─ WARNING: Could not open data array at '{}': {}", indent, data_array_path, e);
                     }
                     _ => {}
                 }
@@ -211,7 +211,7 @@ fn main() -> Result<()> {
                     }
                     }
                     Err(e) if args.verbose => {
-                        println!("{}├─ ⚠️  Could not open time array at '{}': {}", indent, time_array_path, e);
+                        println!("{}├─ WARNING: Could not open time array at '{}': {}", indent, time_array_path, e);
                     }
                     _ => {}
                 }
@@ -262,7 +262,7 @@ fn main() -> Result<()> {
         }
 
         // Show summary
-        println!("✅ Summary: {} stream{}, {} total samples",
+        println!("Summary: {} stream{}, {} total samples",
                  stream_count,
                  if stream_count == 1 { "" } else { "s" },
                  total_samples);
