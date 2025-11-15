@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-11-15
+
+### Changed
+
+- Enhanced license notice to display version number alongside program name
+  - All binaries now show version information in the format: `program-name 1.2.0 Copyright (C) ...`
+  - Version is automatically sourced from Cargo.toml at compile time
+
 ## [1.1.0] - 2025-11-15
 
 ### Added
