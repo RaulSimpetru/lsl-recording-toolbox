@@ -192,9 +192,37 @@ impl ZarrWriter {
             lsl::ChannelFormat::Int32 => write_samples!(i32, Int32),
             lsl::ChannelFormat::Int16 => write_samples!(i16, Int16),
             lsl::ChannelFormat::Int8 => write_samples!(i8, Int8),
+            lsl::ChannelFormat::String => {
+                // For string format (event markers), use 2D array to match other formats
+                // Shape: [channels, samples]
+                self.temp_data_buffer.clear();
+
+                // Collect strings in column-major order (channel-first layout)
+                let mut string_data = Vec::with_capacity(num_channels * num_samples);
+                for channel in 0..num_channels {
+                    for i in 0..num_samples {
+                        if let SampleData::String(values) = &self.sample_buffer[i] {
+                            string_data.push(values[channel].clone());
+                        }
+                    }
+                }
+
+                // Create 2D string array
+                let data_array = Array2::<String>::from_shape_vec(
+                    (num_channels, num_samples),
+                    string_data
+                )?;
+
+                // Define start indices for writing
+                let start_indices = &[0u64, self.current_length as u64];
+
+                // Write to Zarr array
+                self.data_array.store_array_subset_ndarray::<String, Ix2>(start_indices, data_array)?;
+            }
             _ => {
                 return Err(anyhow::anyhow!(
-                    "String format not yet implemented for Zarr"
+                    "Unsupported channel format for Zarr: {:?}",
+                    self.channel_format
                 ));
             }
         }

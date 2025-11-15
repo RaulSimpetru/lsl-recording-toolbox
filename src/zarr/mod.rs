@@ -180,7 +180,14 @@ fn create_group_if_not_exists(store: &Arc<FilesystemStore>, path: &str) -> Resul
 
 
 /// Serialize LSL StreamInfo to JSON value
-fn serialize_stream_info(info: &lsl::StreamInfo) -> Result<serde_json::Value> {
+fn serialize_stream_info(info: &mut lsl::StreamInfo) -> Result<serde_json::Value> {
+    // Get full XML representation and extract just the <desc> element
+    let full_xml = info.to_xml()
+        .map_err(|e| anyhow::anyhow!("Failed to serialize stream info XML: {}", e))?;
+
+    // Parse <desc>...</desc> content to JSON to avoid duplicating basic stream info
+    let description_json = parse_desc_to_json(&full_xml);
+
     let stream_info_json = json!({
         "type": info.stream_type(),
         "source_id": info.source_id(),
@@ -191,10 +198,111 @@ fn serialize_stream_info(info: &lsl::StreamInfo) -> Result<serde_json::Value> {
         "created_at": info.created_at(),
         "uid": info.uid(),
         "session_id": info.session_id(),
-        "version": info.version()
+        "version": info.version(),
+        "description": description_json
     });
 
     Ok(stream_info_json)
+}
+
+/// Parse the <desc> element from LSL XML to JSON using quick-xml
+fn parse_desc_to_json(xml: &str) -> serde_json::Value {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut in_desc = false;
+    let mut depth = 0;
+    let mut desc_xml = Vec::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) if e.name().as_ref() == b"desc" => {
+                in_desc = true;
+                depth = 1;
+            }
+            Ok(Event::Start(e)) if in_desc => {
+                depth += 1;
+                desc_xml.extend_from_slice(b"<");
+                desc_xml.extend_from_slice(e.name().as_ref());
+                desc_xml.extend_from_slice(b">");
+            }
+            Ok(Event::End(e)) if in_desc => {
+                depth -= 1;
+                if depth == 0 {
+                    // Finished reading desc element
+                    let desc_content = String::from_utf8_lossy(&desc_xml).to_string();
+                    return parse_xml_to_json(&desc_content);
+                }
+                desc_xml.extend_from_slice(b"</");
+                desc_xml.extend_from_slice(e.name().as_ref());
+                desc_xml.extend_from_slice(b">");
+            }
+            Ok(Event::Text(e)) if in_desc => {
+                desc_xml.extend_from_slice(&e);
+            }
+            Ok(Event::Empty(e)) if e.name().as_ref() == b"desc" => {
+                // Empty desc element
+                return serde_json::Value::Object(serde_json::Map::new());
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                tracing::warn!("Error parsing LSL XML: {}", e);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
+/// Parse XML string to JSON recursively using quick-xml
+fn parse_xml_to_json(xml: &str) -> serde_json::Value {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut result = serde_json::Map::new();
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut current_tag = String::new();
+    let mut current_text = String::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                current_tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                current_text.clear();
+            }
+            Ok(Event::Text(e)) => {
+                if let Ok(text) = e.unescape() {
+                    current_text.push_str(&text);
+                }
+            }
+            Ok(Event::End(_)) => {
+                if !current_tag.is_empty() {
+                    result.insert(current_tag.clone(), serde_json::Value::String(current_text.clone()));
+                    current_tag.clear();
+                    current_text.clear();
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                result.insert(tag, serde_json::Value::String(String::new()));
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                tracing::warn!("Error parsing XML element: {}", e);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    serde_json::Value::Object(result)
 }
 
 /// Parse recorder config JSON string to serde_json::Value
@@ -211,6 +319,7 @@ fn get_zarr_dtype(channel_format: lsl::ChannelFormat) -> Result<DataType> {
         lsl::ChannelFormat::Int32 => Ok(DataType::Int32),
         lsl::ChannelFormat::Int16 => Ok(DataType::Int16),
         lsl::ChannelFormat::Int8 => Ok(DataType::Int8),
+        lsl::ChannelFormat::String => Ok(DataType::String),
         _ => Err(anyhow::anyhow!(
             "Unsupported channel format for Zarr: {:?}",
             channel_format
@@ -222,7 +331,7 @@ fn get_zarr_dtype(channel_format: lsl::ChannelFormat) -> Result<DataType> {
 pub fn setup_stream_arrays(
     store: &Arc<FilesystemStore>,
     stream_name: &str,
-    info: &lsl::StreamInfo,
+    info: &mut lsl::StreamInfo,
     channel_format: lsl::ChannelFormat,
     recorder_config_json: &str,
     time_correction: f64,
@@ -259,7 +368,7 @@ pub fn setup_stream_arrays(
         let channels = info.channel_count() as usize;
         let dtype = get_zarr_dtype(channel_format)?;
 
-        // Create Blosc codec with LZ4 compression
+        // Create Blosc codec with LZ4 compression (not used for String type)
         let compression_level = BloscCompressionLevel::try_from(5u8)
             .map_err(|e| anyhow::anyhow!("Invalid compression level: {}", e))?;
         let blosc_codec = Arc::new(BloscCodec::new(
@@ -270,18 +379,35 @@ pub fn setup_stream_arrays(
             None, // blocksize (auto-detect)
         )?);
 
-        let array = ArrayBuilder::new(
-            vec![channels as u64, 0], // [channels, samples] - samples dimension is unlimited
-            vec![channels as u64, 100], // chunk size: [channels, 100 samples]
-            dtype,
-            FillValue::from(0.0f32),
-        )
-        .dimension_names(Some(vec![
-            Some("channels".to_string()),
-            Some("samples".to_string()),
-        ]))
-        .bytes_to_bytes_codecs(vec![blosc_codec])
-        .build(store.clone(), &data_path)?;
+        // Select appropriate fill value and build array based on data type
+        let array = if matches!(channel_format, lsl::ChannelFormat::String) {
+            // String arrays: no compression, empty string fill value
+            ArrayBuilder::new(
+                vec![channels as u64, 0], // [channels, samples] - samples dimension is unlimited
+                vec![channels as u64, 100], // chunk size: [channels, 100 samples]
+                dtype,
+                FillValue::from(""),
+            )
+            .dimension_names(Some(vec![
+                Some("channels".to_string()),
+                Some("samples".to_string()),
+            ]))
+            .build(store.clone(), &data_path)?
+        } else {
+            // Numeric arrays: with Blosc compression
+            ArrayBuilder::new(
+                vec![channels as u64, 0], // [channels, samples] - samples dimension is unlimited
+                vec![channels as u64, 100], // chunk size: [channels, 100 samples]
+                dtype,
+                FillValue::from(0.0f32),
+            )
+            .dimension_names(Some(vec![
+                Some("channels".to_string()),
+                Some("samples".to_string()),
+            ]))
+            .bytes_to_bytes_codecs(vec![blosc_codec])
+            .build(store.clone(), &data_path)?
+        };
 
         array.store_metadata()?;
 

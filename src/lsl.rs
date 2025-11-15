@@ -87,7 +87,7 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
 
     let inl = lsl::StreamInlet::new(&res[0], 300, 0, true)
         .map_err(|e| anyhow::anyhow!("LSL error: {}", e))?;
-    let info = inl
+    let mut info = inl
         .info(lsl::FOREVER)
         .map_err(|e| anyhow::anyhow!("LSL error: {}", e))?;
 
@@ -115,7 +115,7 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
     let mut zarr_writer = if let Some(zarr_config) = params.zarr_config {
         initialize_zarr_writer(
             &zarr_config,
-            &info,
+            &mut info,
             &inl,
             &params.recording_config,
             params.recorder_args,
@@ -366,7 +366,7 @@ impl MemoryMonitor {
 /// Initialize Zarr writer with all necessary configuration
 fn initialize_zarr_writer(
     config: &ZarrConfig,
-    info: &lsl::StreamInfo,
+    info: &mut lsl::StreamInfo,
     inl: &lsl::StreamInlet,
     recording_config: &RecordingConfig,
     recorder_args: &Args,
