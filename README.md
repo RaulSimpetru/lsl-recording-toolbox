@@ -365,10 +365,6 @@ cargo clippy
 cargo test
 ```
 
-## Documentation
-
-For detailed development documentation, architecture information, and contributor guidelines, see [CLAUDE.md](CLAUDE.md).
-
 ## Project Structure
 
 ```bash
