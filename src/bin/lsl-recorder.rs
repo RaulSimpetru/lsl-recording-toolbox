@@ -83,6 +83,8 @@ async fn main() -> Result<()> {
 
     let recording = Arc::new(AtomicBool::new(auto_start));
     let quit = Arc::new(AtomicBool::new(false));
+    let first_sample_pulled = Arc::new(AtomicBool::new(false));
+    let is_irregular_stream = Arc::new(AtomicBool::new(false));
 
     // Prepare Zarr configuration
     let zarr_tuple = args.zarr_config();
@@ -113,12 +115,16 @@ async fn main() -> Result<()> {
         // Interactive mode: spawn threads for command handling and recording
         let recording_clone = recording.clone();
         let quit_clone = quit.clone();
+        let first_sample_clone = first_sample_pulled.clone();
+        let is_irregular_clone = is_irregular_stream.clone();
         let source_id = args.source_id.clone();
 
         // Spawn LSL recording thread
         let recording_thread = {
             let recording = recording_clone;
             let quit = quit_clone;
+            let first_sample = first_sample_clone;
+            let is_irregular = is_irregular_clone;
             let zarr_config_clone = zarr_config.clone();
             let recording_config_clone = recording_config.clone();
             let resolution_config_clone = resolution_config.clone();
@@ -130,6 +136,8 @@ async fn main() -> Result<()> {
                     source_id: &source_id,
                     recording,
                     quit,
+                    first_sample_pulled: first_sample,
+                    is_irregular_stream: is_irregular,
                     quiet,
                     zarr_config: zarr_config_clone,
                     recording_config: recording_config_clone,
@@ -144,7 +152,7 @@ async fn main() -> Result<()> {
         };
 
         // Handle commands on main thread
-        if let Err(e) = handle_commands(recording, quit.clone()) {
+        if let Err(e) = handle_commands(recording, quit.clone(), first_sample_pulled, is_irregular_stream) {
             eprintln!("Command handling error: {}", e);
         }
 
@@ -162,11 +170,16 @@ async fn main() -> Result<()> {
         // Set up duration timer (regardless of quiet mode)
         if let Some(duration) = args.duration {
             if !args.quiet {
-                println!("Recording will stop after {} seconds", duration);
+                println!("Recording will stop after {} seconds (timer starts after first sample)", duration);
             }
             let recording_clone = recording.clone();
             let quit_clone = quit.clone();
+            let first_sample_clone = first_sample_pulled.clone();
             thread::spawn(move || {
+                // Wait for first sample to be pulled
+                while !first_sample_clone.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(10));
+                }
                 thread::sleep(Duration::from_secs(duration));
                 recording_clone.store(false, Ordering::SeqCst);
                 quit_clone.store(true, Ordering::SeqCst);
@@ -177,6 +190,8 @@ async fn main() -> Result<()> {
             source_id: &args.source_id,
             recording,
             quit,
+            first_sample_pulled,
+            is_irregular_stream,
             quiet: args.quiet,
             zarr_config,
             recording_config,

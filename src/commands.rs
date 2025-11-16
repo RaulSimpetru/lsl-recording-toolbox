@@ -7,7 +7,12 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
-pub fn handle_commands(recording: Arc<AtomicBool>, quit: Arc<AtomicBool>) -> Result<()> {
+pub fn handle_commands(
+    recording: Arc<AtomicBool>,
+    quit: Arc<AtomicBool>,
+    first_sample_pulled: Arc<AtomicBool>,
+    is_irregular_stream: Arc<AtomicBool>,
+) -> Result<()> {
     let stdin = io::stdin();
     for line_res in stdin.lock().lines() {
         match line_res {
@@ -23,15 +28,41 @@ pub fn handle_commands(recording: Arc<AtomicBool>, quit: Arc<AtomicBool>) -> Res
                     io::stdout().flush().ok();
                 } else if let Some(arg) = cmd.strip_prefix("STOP_AFTER ") {
                     if let Ok(secs) = arg.trim().parse::<u64>() {
-                        println!("STATUS WILL STOP AFTER {}s", secs);
-                        io::stdout().flush().ok();
                         let recording_clone = recording.clone();
-                        thread::spawn(move || {
-                            thread::sleep(Duration::from_secs(secs));
-                            recording_clone.store(false, Ordering::SeqCst);
-                            println!("STATUS STOPPED_BY_TIMER ({}s)", secs);
+                        let first_sample_clone = first_sample_pulled.clone();
+
+                        // Check if this is an irregular stream (set by recording thread after stream resolution)
+                        if is_irregular_stream.load(Ordering::SeqCst) {
+                            // For irregular streams (events): start timer immediately
+                            // Don't wait for first sample as events may be sparse or never arrive
+                            println!("STATUS WILL STOP AFTER {}s (irregular stream: timer starts immediately)", secs);
                             io::stdout().flush().ok();
-                        });
+                            thread::spawn(move || {
+                                println!("STATUS TIMER_STARTED ({}s countdown begins now - irregular stream)", secs);
+                                io::stdout().flush().ok();
+                                thread::sleep(Duration::from_secs(secs));
+                                recording_clone.store(false, Ordering::SeqCst);
+                                println!("STATUS STOPPED_BY_TIMER ({}s)", secs);
+                                io::stdout().flush().ok();
+                            });
+                        } else {
+                            // For regular streams: wait for first sample before starting timer
+                            // This ensures accurate recording duration excluding initialization time
+                            println!("STATUS WILL STOP AFTER {}s (regular stream: timer starts after first sample)", secs);
+                            io::stdout().flush().ok();
+                            thread::spawn(move || {
+                                // Wait for first sample to be pulled
+                                while !first_sample_clone.load(Ordering::SeqCst) {
+                                    thread::sleep(Duration::from_millis(10));
+                                }
+                                println!("STATUS TIMER_STARTED ({}s countdown begins now)", secs);
+                                io::stdout().flush().ok();
+                                thread::sleep(Duration::from_secs(secs));
+                                recording_clone.store(false, Ordering::SeqCst);
+                                println!("STATUS STOPPED_BY_TIMER ({}s)", secs);
+                                io::stdout().flush().ok();
+                            });
+                        }
                     } else {
                         println!("ERROR bad STOP_AFTER arg");
                         io::stdout().flush().ok();

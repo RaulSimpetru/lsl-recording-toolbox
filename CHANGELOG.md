@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2025-11-16
+
+### Added
+
+- Coordinated STOP_AFTER functionality in `lsl-multi-recorder`
+  - New `--duration` parameter for automatic fixed-duration recordings
+  - Event-driven architecture monitors FIRST_SAMPLE status from all child recorders
+  - Waits for all regular streams to pull their first sample before broadcasting STOP_AFTER
+  - Ensures accurate recording duration by eliminating initialization overhead
+  - Handles edge case of irregular-only streams (immediate STOP_AFTER broadcast)
+- Stream type detection in `lsl-recorder`
+  - Emits `STATUS FIRST_SAMPLE (regular)` or `STATUS FIRST_SAMPLE (irregular)` messages
+  - Automatic detection based on `nominal_srate == 0.0` for irregular streams
+  - Provides feedback to parent multi-recorder for coordination
+
+### Changed
+
+- `lsl-sync` offset display now shows intuitive relative timing
+  - Changed from "alignment offset" to "relative to reference" for clarity
+  - Positive values indicate stream started AFTER reference time
+  - Negative values indicate stream started BEFORE reference time
+  - Internal alignment calculations remain unchanged (backwards compatible)
+
+### Fixed
+
+- Fixed recording duration accuracy in multi-stream recordings
+  - Previous: ~27s recordings when requesting 30s due to initialization overhead
+  - Now: Accurate 30s recordings by coordinating STOP_AFTER after all streams ready
+  - Eliminates data loss from sequential stream startup delays
+
 ## [1.3.0] - 2025-11-16
 
 ### Added

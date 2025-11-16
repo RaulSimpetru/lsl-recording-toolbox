@@ -1,5 +1,6 @@
 use anyhow::Result;
 use lsl::Pullable;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -91,6 +92,10 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
         .info(lsl::FOREVER)
         .map_err(|e| anyhow::anyhow!("LSL error: {}", e))?;
 
+    // Detect if this is an irregular stream (nominal_srate == 0)
+    let is_irregular = info.nominal_srate() == 0.0;
+    params.is_irregular_stream.store(is_irregular, Ordering::SeqCst);
+
     if !params.quiet {
         println!("Connected to stream with {} channels", info.channel_count());
         println!("Sample rate: {}", info.nominal_srate());
@@ -166,12 +171,27 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
             if ts != 0.0 {
                 sample_count += 1;
 
-                // Check if we should flush (buffer size or time-based)
-                if let Some(ref mut writer) = zarr_writer {
-                    if writer.needs_flush() {
-                        writer.flush()?;
+                // Signal first sample pulled for STOP_AFTER timer
+                if sample_count == 1 {
+                    params.first_sample_pulled.store(true, Ordering::SeqCst);
+
+                    // Report to parent (lsl-multi-recorder) that first sample is pulled
+                    let stream_type = if params.is_irregular_stream.load(Ordering::SeqCst) {
+                        "irregular"
+                    } else {
+                        "regular"
+                    };
+                    if !params.quiet {
+                        println!("STATUS FIRST_SAMPLE ({})", stream_type);
+                        std::io::stdout().flush().ok();
                     }
                 }
+
+                // Check if we should flush (buffer size or time-based)
+                if let Some(ref mut writer) = zarr_writer
+                    && writer.needs_flush() {
+                        writer.flush()?;
+                    }
 
                 // Memory monitoring report
                 memory_monitor.maybe_report(sample_count, &zarr_writer, params.quiet);
@@ -245,6 +265,8 @@ pub struct RecordingParams<'a> {
     pub source_id: &'a str,
     pub recording: Arc<AtomicBool>,
     pub quit: Arc<AtomicBool>,
+    pub first_sample_pulled: Arc<AtomicBool>,
+    pub is_irregular_stream: Arc<AtomicBool>,
     pub quiet: bool,
     pub zarr_config: Option<ZarrConfig>,
     pub recording_config: RecordingConfig,

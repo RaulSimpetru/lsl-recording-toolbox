@@ -177,18 +177,22 @@ fn main() -> Result<()> {
         println!("\tReference time: {:.6} s", reference_time);
     }
     for (name, offset) in &alignment_offsets {
-        let offset_ms = offset * 1000.0;
-        let sign = if *offset >= 0.0 { "+" } else { "" };
+        // Display relative timing (when stream started relative to reference)
+        // Positive: started BEFORE reference (earlier)
+        // Negative: started AFTER reference (later)
+        // Note: offset itself is what to ADD for alignment (reference - first_ts)
+        let relative_ms = -offset * 1000.0; // Flip sign for intuitive display
+        let sign = if relative_ms >= 0.0 { "+" } else { "" };
         if args.verbose {
             // Find the stream to show aligned time range
             if let Some(stream) = streams.iter().find(|s| s.name == *name) {
                 let first_aligned = stream.timestamps.first().unwrap_or(&0.0) + offset;
                 let last_aligned = stream.timestamps.last().unwrap_or(&0.0) + offset;
-                println!("\t- {}: {}{}ms offset -> t=[{:.6}, {:.6}]",
-                         name, sign, offset_ms as i32, first_aligned, last_aligned);
+                println!("\t- {}: {}{}ms relative to ref -> t=[{:.6}, {:.6}] aligned",
+                         name, sign, relative_ms as i32, first_aligned, last_aligned);
             }
         } else {
-            println!("\t- {}: {}{}ms offset", name, sign, offset_ms as i32);
+            println!("\t- {}: {}{}ms relative to reference", name, sign, relative_ms as i32);
         }
     }
     println!();
@@ -416,12 +420,11 @@ fn calculate_common_window(streams: &[StreamData], alignment_offsets: &HashMap<S
         let mut common_start = f64::NEG_INFINITY;
         let mut common_end = f64::INFINITY;
         for stream in streams {
-            if let Some(&offset) = alignment_offsets.get(&stream.name) {
-                if let (Some(&first_ts), Some(&last_ts)) = (stream.timestamps.first(), stream.timestamps.last()) {
+            if let Some(&offset) = alignment_offsets.get(&stream.name)
+                && let (Some(&first_ts), Some(&last_ts)) = (stream.timestamps.first(), stream.timestamps.last()) {
                     common_start = common_start.max(first_ts + offset);
                     common_end = common_end.min(last_ts + offset);
                 }
-            }
         }
         return (common_start, common_end.max(common_start));
     }
@@ -431,15 +434,14 @@ fn calculate_common_window(streams: &[StreamData], alignment_offsets: &HashMap<S
 
     // Calculate window based on REGULAR streams only
     for stream in regular_streams {
-        if let Some(&offset) = alignment_offsets.get(&stream.name) {
-            if let (Some(&first_ts), Some(&last_ts)) = (stream.timestamps.first(), stream.timestamps.last()) {
+        if let Some(&offset) = alignment_offsets.get(&stream.name)
+            && let (Some(&first_ts), Some(&last_ts)) = (stream.timestamps.first(), stream.timestamps.last()) {
                 let aligned_start = first_ts + offset;
                 let aligned_end = last_ts + offset;
 
                 common_start = common_start.max(aligned_start); // Latest start
                 common_end = common_end.min(aligned_end); // Earliest end
             }
-        }
     }
 
     // Ensure common_end is not before common_start
