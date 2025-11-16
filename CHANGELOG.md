@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2025-11-16
+
+### Added
+
+- Intelligent irregular stream handling in `lsl-sync`
+  - Automatic detection of irregular streams based on `nominal_srate == 0`
+  - Irregular streams (event markers, triggers) no longer constrain the common time window
+  - Only regular streams (continuous data) determine alignment reference time and common window
+  - Event coverage reporting shows distribution of irregular stream events relative to common window
+- Verbose mode for `lsl-sync` (`--verbose` or `-v` flag)
+  - Displays detailed stream information including sample rates and time ranges
+  - Shows aligned time ranges for each stream after offset calculation
+  - Indicates whether alignment uses regular streams or all streams
+
+### Changed
+
+- `lsl-sync` now reads `nominal_srate` from both nested `stream_info.nominal_srate` and top-level attributes
+- Common window calculation excludes irregular streams to prevent data loss from continuous streams
+- Alignment offset calculation uses only regular streams for reference time determination
+
+### Fixed
+
+- Irregular event streams with sparse events no longer cause loss of continuous data during synchronization
+- Proper handling of mixed regular and irregular streams in multi-stream recordings
+
 ## [1.2.0] - 2025-11-15
 
 ### Changed

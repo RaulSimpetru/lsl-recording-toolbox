@@ -103,6 +103,10 @@ struct Args {
     /// Trim both start and end (shorthand for --trim-start --trim-end)
     #[arg(long)]
     trim_both: bool,
+
+    /// Verbose output (show detailed stream information)
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 #[derive(Debug)]
@@ -110,6 +114,8 @@ struct StreamData {
     name: String,
     timestamps: Vec<f64>,
     sample_count: usize,
+    nominal_srate: f64,  // 0.0 for irregular streams
+    is_irregular: bool,  // true if nominal_srate == 0.0
 }
 
 fn main() -> Result<()> {
@@ -140,9 +146,22 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    println!("\tFound {} stream(s)", streams.len());
+    let regular_count = streams.iter().filter(|s| !s.is_irregular).count();
+    let irregular_count = streams.len() - regular_count;
+    println!("\tFound {} stream(s): {} regular, {} irregular",
+             streams.len(), regular_count, irregular_count);
     for stream in &streams {
-        println!("\t- {}: {} samples", stream.name, stream.sample_count);
+        let stream_type = if stream.is_irregular { "irregular" } else { "regular" };
+        if args.verbose {
+            let first_ts = stream.timestamps.first().unwrap_or(&0.0);
+            let last_ts = stream.timestamps.last().unwrap_or(&0.0);
+            let duration = last_ts - first_ts;
+            println!("\t- {} ({}): {} samples, {:.3} Hz, t=[{:.6}, {:.6}] ({:.3}s)",
+                     stream.name, stream_type, stream.sample_count,
+                     stream.nominal_srate, first_ts, last_ts, duration);
+        } else {
+            println!("\t- {} ({}): {} samples", stream.name, stream_type, stream.sample_count);
+        }
     }
     println!();
 
@@ -150,21 +169,40 @@ fn main() -> Result<()> {
     println!("Calculating alignment...");
     let (reference_time, alignment_offsets) = calculate_alignment(&streams, &args.mode)?;
 
-    println!("\tReference time: {:.6} s", reference_time);
+    if args.verbose {
+        println!("\tReference time: {:.6} s (from {} streams)",
+                 reference_time,
+                 if regular_count > 0 { "regular" } else { "all" });
+    } else {
+        println!("\tReference time: {:.6} s", reference_time);
+    }
     for (name, offset) in &alignment_offsets {
         let offset_ms = offset * 1000.0;
         let sign = if *offset >= 0.0 { "+" } else { "" };
-        println!("\t- {}: {}{}ms offset", name, sign, offset_ms as i32);
+        if args.verbose {
+            // Find the stream to show aligned time range
+            if let Some(stream) = streams.iter().find(|s| s.name == *name) {
+                let first_aligned = stream.timestamps.first().unwrap_or(&0.0) + offset;
+                let last_aligned = stream.timestamps.last().unwrap_or(&0.0) + offset;
+                println!("\t- {}: {}{}ms offset -> t=[{:.6}, {:.6}]",
+                         name, sign, offset_ms as i32, first_aligned, last_aligned);
+            }
+        } else {
+            println!("\t- {}: {}{}ms offset", name, sign, offset_ms as i32);
+        }
     }
     println!();
 
-    // Calculate common time window
+    // Calculate common time window (based on regular streams only)
     let (common_start, common_end) = calculate_common_window(&streams, &alignment_offsets);
     let duration = common_end - common_start;
     println!("Common window (absolute): {:.6} s -> {:.6} s (duration: {:.3} s)",
              common_start, common_end, duration);
     println!("Common window (relative): 0.000000 s -> {:.6} s (after alignment)", duration);
     println!();
+
+    // Check and warn about irregular streams with events outside common window
+    check_irregular_stream_coverage(&streams, &alignment_offsets, common_start, common_end, trim_start, trim_end);
 
     // Write aligned timestamps and sync metadata
     println!("Writing synchronized data...");
@@ -265,10 +303,32 @@ fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &Path) -> Result<Vec<St
 
         let timestamps: Vec<f64> = timestamps_array.iter().take(sample_count).copied().collect();
 
+        // Read nominal_srate from stream metadata
+        let stream_group_path = format!("/streams/{}", stream_name);
+        let stream_group = zarrs::group::Group::open(store.clone(), &stream_group_path)?;
+
+        // Try to read from stream_info.nominal_srate first (nested), then fallback to top-level
+        let nominal_srate = stream_group
+            .attributes()
+            .get("stream_info")
+            .and_then(|v| v.get("nominal_srate"))
+            .and_then(|v| v.as_f64())
+            .or_else(|| {
+                stream_group
+                    .attributes()
+                    .get("nominal_srate")
+                    .and_then(|v| v.as_f64())
+            })
+            .unwrap_or(0.0);
+
+        let is_irregular = nominal_srate == 0.0;
+
         streams.push(StreamData {
             name: stream_name,
             timestamps,
             sample_count,
+            nominal_srate,
+            is_irregular,
         });
     }
 
@@ -282,25 +342,47 @@ fn calculate_alignment(streams: &[StreamData], mode: &str) -> Result<(f64, HashM
         return Ok((0.0, alignment_offsets));
     }
 
+    // Only use regular streams for alignment calculation
+    // Irregular streams (events, markers) should not constrain the time window
+    let regular_streams: Vec<_> = streams.iter().filter(|s| !s.is_irregular).collect();
+
+    if regular_streams.is_empty() {
+        println!("\tWARNING: No regular streams found - using all streams for alignment");
+        // Fallback: use all streams if no regular streams exist
+        let reference_time = match mode {
+            "first-stream" => streams.iter().filter_map(|s| s.timestamps.first()).fold(f64::INFINITY, |acc, &x| acc.min(x)),
+            "last-stream" | "common-start" => streams.iter().filter_map(|s| s.timestamps.first()).fold(f64::NEG_INFINITY, |acc, &x| acc.max(x)),
+            "absolute-zero" => 0.0,
+            _ => anyhow::bail!("Unknown alignment mode: {}", mode),
+        };
+        for stream in streams {
+            if let Some(&first_timestamp) = stream.timestamps.first() {
+                alignment_offsets.insert(stream.name.clone(), reference_time - first_timestamp);
+            }
+        }
+        return Ok((reference_time, alignment_offsets));
+    }
+
     let reference_time = match mode {
         "first-stream" => {
-            // Earliest start time
-            streams
+            // Earliest start time among REGULAR streams only
+            regular_streams
                 .iter()
                 .filter_map(|s| s.timestamps.first())
                 .fold(f64::INFINITY, |acc, &x| acc.min(x))
         }
         "last-stream" => {
-            // Latest start time
-            streams
+            // Latest start time among REGULAR streams only
+            regular_streams
                 .iter()
                 .filter_map(|s| s.timestamps.first())
                 .fold(f64::NEG_INFINITY, |acc, &x| acc.max(x))
         }
         "absolute-zero" => 0.0,
         "common-start" => {
-            // Latest start time (where ALL streams have data) becomes t=0
-            streams
+            // Latest start time (where ALL REGULAR streams have data) becomes t=0
+            // Irregular streams do NOT constrain this
+            regular_streams
                 .iter()
                 .filter_map(|s| s.timestamps.first())
                 .fold(f64::NEG_INFINITY, |acc, &x| acc.max(x))
@@ -308,7 +390,8 @@ fn calculate_alignment(streams: &[StreamData], mode: &str) -> Result<(f64, HashM
         _ => anyhow::bail!("Unknown alignment mode: {}", mode),
     };
 
-    // Calculate offset for each stream
+    // Calculate offset for ALL streams (both regular and irregular)
+    // Irregular streams get the same offset but won't be trimmed aggressively
     for stream in streams {
         if let Some(&first_timestamp) = stream.timestamps.first() {
             let offset = reference_time - first_timestamp;
@@ -324,10 +407,30 @@ fn calculate_common_window(streams: &[StreamData], alignment_offsets: &HashMap<S
         return (0.0, 0.0);
     }
 
+    // Only use regular streams to calculate common window
+    // Irregular streams should not constrain the time window
+    let regular_streams: Vec<_> = streams.iter().filter(|s| !s.is_irregular).collect();
+
+    if regular_streams.is_empty() {
+        // Fallback: if no regular streams, use all streams
+        let mut common_start = f64::NEG_INFINITY;
+        let mut common_end = f64::INFINITY;
+        for stream in streams {
+            if let Some(&offset) = alignment_offsets.get(&stream.name) {
+                if let (Some(&first_ts), Some(&last_ts)) = (stream.timestamps.first(), stream.timestamps.last()) {
+                    common_start = common_start.max(first_ts + offset);
+                    common_end = common_end.min(last_ts + offset);
+                }
+            }
+        }
+        return (common_start, common_end.max(common_start));
+    }
+
     let mut common_start = f64::NEG_INFINITY;
     let mut common_end = f64::INFINITY;
 
-    for stream in streams {
+    // Calculate window based on REGULAR streams only
+    for stream in regular_streams {
         if let Some(&offset) = alignment_offsets.get(&stream.name) {
             if let (Some(&first_ts), Some(&last_ts)) = (stream.timestamps.first(), stream.timestamps.last()) {
                 let aligned_start = first_ts + offset;
@@ -345,6 +448,74 @@ fn calculate_common_window(streams: &[StreamData], alignment_offsets: &HashMap<S
     }
 
     (common_start, common_end)
+}
+
+fn check_irregular_stream_coverage(
+    streams: &[StreamData],
+    alignment_offsets: &HashMap<String, f64>,
+    common_start: f64,
+    common_end: f64,
+    trim_start: bool,
+    trim_end: bool,
+) {
+    let irregular_streams: Vec<_> = streams.iter().filter(|s| s.is_irregular).collect();
+
+    if irregular_streams.is_empty() {
+        return;
+    }
+
+    let mut warnings = Vec::new();
+
+    for stream in irregular_streams {
+        if let Some(&offset) = alignment_offsets.get(&stream.name) {
+            // Count events outside the common window
+            let mut events_before = 0;
+            let mut events_after = 0;
+            let mut events_inside = 0;
+
+            for &ts in &stream.timestamps {
+                let aligned_ts = ts + offset;
+                if aligned_ts < common_start {
+                    events_before += 1;
+                } else if aligned_ts > common_end {
+                    events_after += 1;
+                } else {
+                    events_inside += 1;
+                }
+            }
+
+            // Warn if trimming is enabled and events would be lost
+            if trim_start && events_before > 0 {
+                warnings.push(format!(
+                    "\t- {}: {} event(s) before common window (will be trimmed)",
+                    stream.name, events_before
+                ));
+            }
+            if trim_end && events_after > 0 {
+                warnings.push(format!(
+                    "\t- {}: {} event(s) after common window (will be trimmed)",
+                    stream.name, events_after
+                ));
+            }
+
+            // Info about event distribution
+            if events_before > 0 || events_after > 0 {
+                let total = stream.timestamps.len();
+                warnings.push(format!(
+                    "\t- {}: {}/{} events inside window, {} before, {} after",
+                    stream.name, events_inside, total, events_before, events_after
+                ));
+            }
+        }
+    }
+
+    if !warnings.is_empty() {
+        println!("Irregular stream event coverage:");
+        for warning in warnings {
+            println!("{}", warning);
+        }
+        println!();
+    }
 }
 
 struct AlignmentParams<'a> {

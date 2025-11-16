@@ -1,6 +1,6 @@
 [package]
 name = "lsl-recording-toolbox"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2024"
 description = "Comprehensive toolkit for recording Lab Streaming Layer (LSL) data streams to Zarr format with multi-stream synchronization"
 license = "GPL-3.0-or-later"
