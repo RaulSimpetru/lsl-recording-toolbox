@@ -135,6 +135,8 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
 
     let mut sample_count: u64 = 0;
     let mut memory_monitor = MemoryMonitor::new(params.recorder_args.memory_monitor);
+    let mut first_timestamp: Option<f64> = None;
+    let mut last_timestamp: Option<f64> = None;
 
     loop {
         if params.quit.load(Ordering::SeqCst) {
@@ -170,9 +172,11 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
 
             if ts != 0.0 {
                 sample_count += 1;
+                last_timestamp = Some(ts);  // Track last timestamp
 
                 // Signal first sample pulled for STOP_AFTER timer
                 if sample_count == 1 {
+                    first_timestamp = Some(ts);  // Track first timestamp
                     params.first_sample_pulled.store(true, Ordering::SeqCst);
 
                     // Report to parent (lsl-multi-recorder) that first sample is pulled
@@ -204,6 +208,10 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
     // Final flush for any remaining samples
     if let Some(ref mut writer) = zarr_writer {
         writer.flush()?;
+
+        // Update final recording metadata with first and last timestamps
+        // Note: requested duration is already in recorder_config.duration
+        writer.finalize_recording_metadata(first_timestamp, last_timestamp)?;
     }
 
     if !params.quiet {
@@ -457,5 +465,7 @@ fn initialize_zarr_writer(
         channel_format,
         recording_config.flush_interval,
         config.store_path.clone(),
+        store,
+        config.stream_name.clone(),
     )?))
 }

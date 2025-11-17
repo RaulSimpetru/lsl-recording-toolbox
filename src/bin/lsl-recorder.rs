@@ -41,12 +41,11 @@
 //! Creates Zarr file structure:
 //! ```text
 //! experiment.zarr/
-//! ├── streams/
-//! │   └── <stream_name>/
-//! │       ├── data        [N × C] float32
-//! │       ├── time        [N] float64
-//! │       └── zarr.json   (metadata)
-//! └── meta/               (global metadata)
+//! ├── <stream_name>/
+//! │   ├── data        [N × C] float32
+//! │   ├── time        [N] float64
+//! │   └── zarr.json   (metadata)
+//! └── zarr.json       (root metadata)
 //! ```
 //!
 //! # Interactive Commands

@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2025-11-17
+
+### Added
+
+- Recording timestamp tracking
+  - `first_timestamp`: LSL timestamp of the first recorded sample stored in stream attributes
+  - `last_timestamp`: LSL timestamp of the last recorded sample stored in stream attributes
+  - Critical for determining if irregular events were cut off by recording end
+  - Allows calculation of actual recorded duration: `last_timestamp - first_timestamp`
+  - Requested duration already available in `recorder_config.duration` (from `--duration` flag)
+
+### Changed
+
+- **Major metadata cleanup** - Removed all redundant data and simplified zarr structure
+  - **Removed `/meta` group entirely** - All metadata was duplicated from other locations
+    - Global `/meta` stored subject/session/notes (already in `recorder_config`)
+    - Per-stream `/meta/<name>` stored stream info (already in stream group attributes)
+  - **Removed `/streams` intermediate group** - Streams now at zarr root (`/EMG/` instead of `/streams/EMG/`)
+    - Simpler path structure: `/<stream_name>/data` and `/<stream_name>/time`
+    - Updated lsl-sync, lsl-inspect, and lsl-validate to work with new structure
+  - **Cleaned recorder_config** - Removed redundant fields:
+    - `source_id` → Already in `stream_info.source_id`
+    - `output` → Implicit from file path
+    - `stream_name` → Implicit from zarr group path
+    - `suffix` → Deprecated, always null
+  - **Removed duplicate top-level fields**:
+    - `recording_host` → Duplicate of `stream_info.hostname`
+  - Result: Cleaner structure, smaller file size, single source of truth for all metadata
+
+### Fixed
+
+- **Critical fix**: `lsl-multi-recorder` now correctly passes `--duration` flag to child lsl-recorder processes
+  - Previously, the duration was accepted by lsl-multi-recorder but not propagated to child processes
+  - This caused `recorder_config.duration` to always be `null` in zarr metadata
+  - Now properly records requested duration for analyzing irregular event truncation
+
 ## [1.5.0] - 2025-11-17
 
 ### Added
@@ -29,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Improved irregular stream validation logic
+- Improved irregular stream validation logic in `lsl-sync`
   - Removed overly restrictive minimum sample count criterion (previously required 3+ samples)
   - Now accepts any irregular stream with valid, non-identical timestamps
   - Better support for legitimate low-event streams (e.g., start/stop markers with only 2 events)

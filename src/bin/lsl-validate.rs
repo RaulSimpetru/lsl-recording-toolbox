@@ -109,13 +109,12 @@ fn load_zarr_stream_data(store_path: &str) -> Result<Vec<StreamData>> {
     let store = Arc::new(FilesystemStore::new(store_path)?);
     let mut streams = Vec::new();
 
-    // Find all streams in /streams/
-    let streams_dir = path.join("streams");
-    if !streams_dir.exists() || !streams_dir.is_dir() {
+    // Find all streams in zarr root
+    if !path.exists() || !path.is_dir() {
         return Err(anyhow::anyhow!("No streams found in store"));
     }
 
-    for entry in std::fs::read_dir(streams_dir)? {
+    for entry in std::fs::read_dir(path)? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -124,7 +123,7 @@ fn load_zarr_stream_data(store_path: &str) -> Result<Vec<StreamData>> {
         let stream_name = entry.file_name().to_string_lossy().to_string();
         let mut stream_data = StreamData::new(stream_name.clone(), store_path.to_string());
 
-        let stream_path = format!("/streams/{}", stream_name);
+        let stream_path = format!("/{}", stream_name);
 
         // Load timestamps
         let time_array_path = format!("{}/time", stream_path);

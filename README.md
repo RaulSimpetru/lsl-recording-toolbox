@@ -226,46 +226,40 @@ Options:
 
 ## Zarr Store Structure
 
-LSL Recorder creates hierarchical Zarr stores optimized for scientific analysis:
+LSL Recorder creates hierarchical Zarr v3 stores optimized for scientific analysis:
 
 ```bash
 experiment.zarr/
-├── .zgroup                    # Root group metadata
-├── meta/
-│   ├── .zgroup
-│   └── .zattrs               # Global metadata (subject, session_id, start_time, notes)
-├── streams/
-│   ├── .zgroup
-│   ├── EMG/
-│   │   ├── .zgroup
-│   │   ├── data/
-│   │   │   ├── .zarray       # Array metadata [channels × samples]
-│   │   │   ├── .zattrs       # stream_info, recorder_config (JSON)
-│   │   │   └── c/            # Compressed chunks
-│   │   │       ├── 0.0
-│   │   │       ├── 0.1
-│   │   │       └── ...
-│   │   └── time/
-│   │       ├── .zarray       # Array metadata [samples]
-│   │       ├── .zattrs       # Timestamp metadata
-│   │       └── c/            # Compressed chunks
-│   │           ├── 0
-│   │           ├── 1
-│   │           └── ...
-│   └── EEG/
-│       └── ... (similar structure)
-└── sync/
-    ├── .zgroup
-    └── .zattrs               # Synchronization metadata
+├── zarr.json                 # Root group metadata
+├── EMG/
+│   ├── zarr.json            # Stream metadata (stream_info, recorder_config, timestamps)
+│   ├── data/
+│   │   ├── zarr.json        # Array metadata [channels × samples]
+│   │   └── c/               # Compressed chunks (Blosc LZ4 + BitShuffle)
+│   │       ├── 0/0
+│   │       ├── 0/1
+│   │       └── ...
+│   ├── time/
+│   │   ├── zarr.json        # Array metadata [samples]
+│   │   └── c/               # Compressed chunks
+│   │       ├── 0
+│   │       ├── 1
+│   │       └── ...
+│   └── aligned_time/        # Created by lsl-sync
+│       ├── zarr.json
+│       └── c/
+└── EEG/
+    └── ... (similar structure)
 ```
 
 **Key Features:**
 
+- **Zarr v3 format**: Modern specification with zarr.json metadata files
 - **Channels-first layout**: `data[channels, samples]` for efficient channel access
 - **Float64 timestamps**: Microsecond-precision LSL timestamps
-- **Chunked storage**: 100-sample chunks with Blosc/LZ4 compression
-- **JSON metadata**: Complete stream and recorder configuration in .zattrs files
-- **Cloud-optimized**: Directory-based format compatible with cloud storage
+- **Blosc compression**: LZ4 + BitShuffle for 4-8x compression on EMG/EEG data
+- **Chunked storage**: 100-sample chunks for optimal I/O performance
+- **Clean hierarchy**: Streams at root level, no redundant metadata
 - **Concurrent writes**: Thread-safe Zarr access for multi-recorder scenarios
 
 ## Common Workflows

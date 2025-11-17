@@ -6,7 +6,7 @@ use serde_json::json;
 use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use zarrs::array::{Array, ArrayBuilder, DataType, FillValue};
 use zarrs::array::codec::{BloscCodec, BloscCompressionLevel, BloscCompressor, BloscShuffleMode};
 use zarrs::filesystem::FilesystemStore;
@@ -16,9 +16,9 @@ use zarrs::storage::{StoreKey, ReadableStorageTraits};
 /// Initialize or open Zarr store with base structure, handling concurrent access
 pub fn open_or_create_zarr_store(
     store_path: &Path,
-    subject: Option<&str>,
-    session_id: Option<&str>,
-    notes: Option<&str>,
+    _subject: Option<&str>,
+    _session_id: Option<&str>,
+    _notes: Option<&str>,
 ) -> Result<Arc<FilesystemStore>> {
     println!("Writing to Zarr store: {:?}", store_path);
 
@@ -41,7 +41,7 @@ pub fn open_or_create_zarr_store(
 
     // Initialize base structure if needed (protected by lock)
     for attempt in 0..2 {
-        match initialize_store_structure(&store, subject, session_id, notes) {
+        match initialize_store_structure(&store) {
             Ok(_) => {
                 // Release lock before returning
                 lock_file.unlock()?;
@@ -72,46 +72,14 @@ pub fn open_or_create_zarr_store(
     Ok(store)
 }
 
-/// Initialize Zarr store with base group structure and metadata
+/// Initialize Zarr store with base group structure
 fn initialize_store_structure(
     store: &Arc<FilesystemStore>,
-    subject: Option<&str>,
-    session_id: Option<&str>,
-    notes: Option<&str>,
 ) -> Result<()> {
     // Create root group if it doesn't exist
     if !group_exists(store, "/")? {
         let root_group = GroupBuilder::new().build(store.clone(), "/")?;
         root_group.store_metadata()?;
-    }
-
-    // Create base groups
-    create_group_if_not_exists(store, "/streams")?;
-    create_group_if_not_exists(store, "/meta")?;
-
-    // Write global metadata only if it doesn't exist (idempotent - first process wins)
-    if !metadata_exists(store, "/meta")? {
-        // Set metadata on /meta group
-        let mut meta_attrs = serde_json::Map::new();
-
-        if let Some(subject) = subject {
-            meta_attrs.insert("subject".to_string(), json!(subject));
-        }
-        if let Some(session_id) = session_id {
-            meta_attrs.insert("session_id".to_string(), json!(session_id));
-        }
-        if let Some(notes) = notes {
-            meta_attrs.insert("notes".to_string(), json!(notes));
-        }
-
-        let start_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
-        meta_attrs.insert("start_time".to_string(), json!(start_time));
-        meta_attrs.insert("global_reference".to_string(), json!("LSL clock of recorder host"));
-
-        // Write metadata to /meta group using Group API
-        let mut meta_group = zarrs::group::Group::open(store.clone(), "/meta")?;
-        meta_group.attributes_mut().extend(meta_attrs);
-        meta_group.store_metadata()?;
     }
 
     Ok(())
@@ -132,30 +100,6 @@ fn group_exists(store: &Arc<FilesystemStore>, path: &str) -> Result<bool> {
             // Parse JSON and check node_type
             let json: serde_json::Value = serde_json::from_slice(&data)?;
             Ok(json.get("node_type").and_then(|v| v.as_str()) == Some("group"))
-        }
-        _ => Ok(false),
-    }
-}
-
-/// Check if metadata exists for a given path by checking zarr.json attributes
-fn metadata_exists(store: &Arc<FilesystemStore>, path: &str) -> Result<bool> {
-    let trimmed_path = path.trim_end_matches('/');
-    let metadata_path = if trimmed_path.is_empty() || trimmed_path == "/" {
-        "zarr.json".to_string()  // Root group
-    } else {
-        format!("{}/zarr.json", trimmed_path.trim_start_matches('/'))
-    };
-    let metadata_key = StoreKey::new(&metadata_path)?;
-
-    match store.get(&metadata_key) {
-        Ok(Some(data)) => {
-            // Parse JSON and check if attributes exist and are non-empty
-            let json: serde_json::Value = serde_json::from_slice(&data)?;
-            if let Some(attrs) = json.get("attributes").and_then(|v| v.as_object()) {
-                Ok(!attrs.is_empty())
-            } else {
-                Ok(false)
-            }
         }
         _ => Ok(false),
     }
@@ -349,24 +293,13 @@ pub fn setup_stream_arrays(
     time_correction: f64,
     first_timestamp: Option<f64>,
 ) -> Result<(Array<FilesystemStore>, Array<FilesystemStore>)> {
-    // Ensure /streams group exists
-    create_group_if_not_exists(store, "/streams")?;
-
     // Create stream group (use absolute path with /)
-    let stream_path = format!("/streams/{}", stream_name);
+    let stream_path = format!("/{}", stream_name);
     create_group_if_not_exists(store, &stream_path)?;
-
-    // Ensure /meta/<stream_name> group exists
-    let meta_path = format!("/meta/{}", stream_name);
-    create_group_if_not_exists(store, &meta_path)?;
 
     // Prepare sync metadata (will be added to stream group attributes)
     let mut sync_attrs = serde_json::Map::new();
     sync_attrs.insert("lsl_clock_offset".to_string(), json!(time_correction));
-    sync_attrs.insert("recording_host".to_string(), json!(hostname::get()
-        .unwrap_or_else(|_| std::ffi::OsString::from("unknown"))
-        .to_string_lossy()
-        .to_string()));
     sync_attrs.insert("recorded_at".to_string(), json!(chrono::Utc::now().to_rfc3339()));
     if let Some(first_ts) = first_timestamp {
         sync_attrs.insert("first_timestamp".to_string(), json!(first_ts));
@@ -444,18 +377,6 @@ pub fn setup_stream_arrays(
         stream_attrs.extend(sync_attrs);
         stream_group.attributes_mut().extend(stream_attrs);
         stream_group.store_metadata()?;
-
-        // Also store in /meta/<stream_name> group
-        let meta_path = format!("/meta/{}", stream_name);
-        create_group_if_not_exists(store, &meta_path)?;
-
-        let mut meta_group = zarrs::group::Group::open(store.clone(), &meta_path)?;
-        let mut meta_attrs = serde_json::Map::new();
-        meta_attrs.insert("created_at".to_string(), json!(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64()));
-        meta_attrs.insert("stream_name".to_string(), json!(stream_name));
-        meta_attrs.insert("nominal_srate".to_string(), json!(info.nominal_srate()));
-        meta_group.attributes_mut().extend(meta_attrs);
-        meta_group.store_metadata()?;
 
         array
     };

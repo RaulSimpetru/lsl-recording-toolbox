@@ -62,6 +62,9 @@ pub struct ZarrWriter {
     last_flush_duration: Duration,
     // File lock for coordinating metadata writes across concurrent processes
     metadata_lock: File,
+    // Store reference and stream name for metadata updates
+    store: std::sync::Arc<FilesystemStore>,
+    stream_name: String,
 }
 
 impl ZarrWriter {
@@ -72,6 +75,8 @@ impl ZarrWriter {
         channel_format: lsl::ChannelFormat,
         flush_interval: Duration,
         store_path: PathBuf,
+        store: std::sync::Arc<FilesystemStore>,
+        stream_name: String,
     ) -> Result<Self> {
         // Set max buffer size to 10x normal buffer size to prevent memory bloat
         let max_buffer_size = (buffer_size * 10).max(1000);
@@ -100,6 +105,8 @@ impl ZarrWriter {
             slow_flush_warnings: 0,
             last_flush_duration: Duration::from_millis(0),
             metadata_lock,
+            store,
+            stream_name,
         })
     }
 
@@ -310,5 +317,45 @@ impl ZarrWriter {
     /// Get buffer capacity for monitoring
     pub fn buffer_capacity(&self) -> usize {
         self.max_buffer_size
+    }
+
+    /// Finalize recording metadata with first and last timestamps
+    pub fn finalize_recording_metadata(
+        &mut self,
+        first_timestamp: Option<f64>,
+        last_timestamp: Option<f64>,
+    ) -> Result<()> {
+        // Open the stream group to update its attributes
+        let stream_path = format!("/{}", self.stream_name);
+        let mut stream_group = zarrs::group::Group::open(self.store.clone(), &stream_path)?;
+
+        // Acquire exclusive lock for metadata write
+        self.metadata_lock.lock_exclusive()?;
+
+        // Add final recording metadata
+        if let Some(first_ts) = first_timestamp {
+            stream_group.attributes_mut().insert(
+                "first_timestamp".to_string(),
+                serde_json::json!(first_ts)
+            );
+        }
+
+        if let Some(last_ts) = last_timestamp {
+            stream_group.attributes_mut().insert(
+                "last_timestamp".to_string(),
+                serde_json::json!(last_ts)
+            );
+        }
+
+        // Note: requested_duration is already stored in recorder_config.duration
+
+        // Store metadata to disk
+        let result = stream_group.store_metadata();
+
+        // Release lock
+        self.metadata_lock.unlock()?;
+
+        result?;
+        Ok(())
     }
 }

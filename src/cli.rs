@@ -115,7 +115,7 @@ impl Args {
     /// Get the Zarr configuration tuple from the parsed arguments
     /// Returns (store_path, stream_name, subject, session_id, notes)
     /// Note: Multiple streams can now write to the same Zarr file concurrently
-    /// by using different stream_name values under /streams/{stream_name}/
+    /// by using different stream_name values under /{stream_name}/
     pub fn zarr_config(
         &self,
     ) -> (
@@ -126,7 +126,7 @@ impl Args {
         Option<String>,
     ) {
         // Single Zarr file for all streams - concurrent writes are supported
-        // via stream-specific subgroups: /streams/{stream_name}/
+        // via stream-specific subgroups: /{stream_name}/
         let zarr_store_path = PathBuf::from(format!("{}.zarr", self.output.display()));
 
         (
@@ -161,10 +161,6 @@ impl Args {
             "auto_start": self.auto_start,
             "duration": self.duration,
             "buffer_size": self.buffer_size,
-            "source_id": self.source_id,
-            "output": self.output.display().to_string(),
-            "stream_name": self.stream_name,
-            "suffix": self.suffix,
             "recorded_at": recording_start_time,
             "recorder_version": env!("CARGO_PKG_VERSION")
         });

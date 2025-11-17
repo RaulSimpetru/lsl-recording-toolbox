@@ -55,17 +55,19 @@
 //! All streams write to a single shared Zarr file:
 //! ```text
 //! experiment.zarr/
-//! ├── streams/
-//! │   ├── EMG/
-//! │   │   ├── data
-//! │   │   └── time
-//! │   ├── EEG/
-//! │   │   ├── data
-//! │   │   └── time
-//! │   └── Events/
-//! │       ├── events
-//! │       └── time
-//! └── meta/  (shared metadata)
+//! ├── EMG/
+//! │   ├── data
+//! │   ├── time
+//! │   └── zarr.json (stream metadata)
+//! ├── EEG/
+//! │   ├── data
+//! │   ├── time
+//! │   └── zarr.json (stream metadata)
+//! ├── Events/
+//! │   ├── events
+//! │   ├── time
+//! │   └── zarr.json (stream metadata)
+//! └── zarr.json (root metadata)
 //! ```
 
 use anyhow::{Context, Result};
@@ -256,6 +258,11 @@ fn spawn_recorder(
     if let Some(ref notes) = args.notes {
         cmd_args.push("--notes".to_string());
         cmd_args.push(notes.clone());
+    }
+
+    if let Some(duration) = args.duration {
+        cmd_args.push("--duration".to_string());
+        cmd_args.push(duration.to_string());
     }
 
     let mut child = Command::new(recorder_path)
@@ -546,7 +553,7 @@ fn main() -> Result<()> {
     log_with_time("Recorded streams:", start_time);
 
     for recorder in &recorders {
-        log_with_time(&format!("\t/streams/{}/", recorder.stream_name), start_time);
+        log_with_time(&format!("\t/{}/", recorder.stream_name), start_time);
     }
 
     Ok(())

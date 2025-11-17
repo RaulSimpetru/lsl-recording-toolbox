@@ -9,7 +9,7 @@
 //! - Multiple alignment modes (common-start, first-stream, last-stream, absolute-zero)
 //! - Optional trimming to remove data outside common time window
 //! - Non-destructive: preserves original raw timestamps
-//! - Writes aligned timestamps to `/streams/<name>/aligned_time`
+//! - Writes aligned timestamps to `/<name>/aligned_time`
 //! - Stores alignment metadata in Zarr attributes
 //! - Supports any number of streams in a Zarr file
 //!
@@ -45,8 +45,8 @@
 //! # Output
 //!
 //! For each stream:
-//! - Creates `/streams/<name>/aligned_time` array with synchronized timestamps
-//! - Stores metadata in `/streams/<name>/zarr.json`:
+//! - Creates `/<name>/aligned_time` array with synchronized timestamps
+//! - Stores metadata in `/<name>/zarr.json`:
 //!   - `alignment_offset`: Time offset applied
 //!   - `trim_start_index`: Start index if trimmed
 //!   - `trim_end_index`: End index if trimmed
@@ -325,10 +325,10 @@ fn main() -> Result<()> {
     println!("Synchronization complete!");
     println!();
     println!("Aligned timestamps written to:");
-    println!("\t/streams/<stream>/aligned_time");
+    println!("\t/<stream>/aligned_time");
     println!();
     println!("Alignment metadata written to:");
-    println!("\t/streams/<stream>/zarr.json (attributes)");
+    println!("\t/<stream>/zarr.json (attributes)");
     println!();
     println!("Use lsl-inspect to view results:");
     println!("\tlsl-inspect {} --verbose", args.zarr_file.display());
@@ -339,14 +339,13 @@ fn main() -> Result<()> {
 fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &Path) -> Result<Vec<StreamData>> {
     let streams = Vec::new();
 
-    // Read streams from /streams directory
-    let streams_dir = zarr_path.join("streams");
-    if !streams_dir.exists() {
+    // Read streams from zarr root directory
+    if !zarr_path.exists() {
         return Ok(streams);
     }
 
     let mut streams = Vec::new();
-    for entry in std::fs::read_dir(streams_dir)? {
+    for entry in std::fs::read_dir(zarr_path)? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -355,7 +354,7 @@ fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &Path) -> Result<Vec<St
         let stream_name = entry.file_name().to_string_lossy().to_string();
 
         // Read time array
-        let time_path = format!("/streams/{}/time", stream_name);
+        let time_path = format!("/{}/time", stream_name);
         let time_array = Array::<FilesystemStore>::open(store.clone(), &time_path)?;
 
         // For unlimited dimensions, shape may be 0 in metadata even if data exists
@@ -366,7 +365,7 @@ fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &Path) -> Result<Vec<St
         let chunk_size = chunk_shape[0].get() as usize;
 
         // Find highest chunk by checking chunk directory
-        let time_chunk_dir = zarr_path.join(format!("streams/{}/time/c", stream_name));
+        let time_chunk_dir = zarr_path.join(format!("{}/time/c", stream_name));
         let mut max_chunk = 0;
         if time_chunk_dir.exists() {
             for entry in std::fs::read_dir(&time_chunk_dir)?.flatten() {
@@ -405,7 +404,7 @@ fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &Path) -> Result<Vec<St
         let timestamps: Vec<f64> = timestamps_array.iter().take(sample_count).copied().collect();
 
         // Read nominal_srate from stream metadata
-        let stream_group_path = format!("/streams/{}", stream_name);
+        let stream_group_path = format!("/{}", stream_name);
         let stream_group = zarrs::group::Group::open(store.clone(), &stream_group_path)?;
 
         // Try to read from stream_info.nominal_srate first (nested), then fallback to top-level
@@ -676,8 +675,8 @@ fn write_aligned_timestamps(params: AlignmentParams) -> Result<()> {
     // Write ALL aligned timestamps (no trimming - Python will use indices)
     let final_timestamps = &aligned_timestamps;
 
-    // Write to /streams/<stream>/aligned_time (right next to the raw time array)
-    let stream_path = format!("/streams/{}", stream_name);
+    // Write to /<stream>/aligned_time (right next to the raw time array)
+    let stream_path = format!("/{}", stream_name);
     let aligned_time_path = format!("{}/aligned_time", stream_path);
 
     // Create Blosc codec with BitShuffle for optimal float64 compression
@@ -707,7 +706,7 @@ fn write_aligned_timestamps(params: AlignmentParams) -> Result<()> {
     array.store_array_subset_ndarray::<f64, Ix1>(&[0], data_array)?;
 
     // Write alignment metadata as attributes to the stream group
-    let stream_group_path = format!("/streams/{}", stream_name);
+    let stream_group_path = format!("/{}", stream_name);
     let mut stream_group = zarrs::group::Group::open(store.clone(), &stream_group_path)?;
 
     // Add alignment metadata (trim indices for Python to use, but no actual trimming)

@@ -105,22 +105,17 @@
 //!
 //! ```text
 //! experiment.zarr/
-//! ├── streams/
-//! │   ├── EMG/
-//! │   │   ├── data           [N × C] float32 (samples × channels)
-//! │   │   ├── time           [N] float64 (LSL timestamps)
-//! │   │   ├── aligned_time   [N] float64 (synchronized, created by lsl-sync)
-//! │   │   └── zarr.json      (metadata and attributes)
-//! │   └── EEG/
-//! │       ├── data
-//! │       ├── time
-//! │       ├── aligned_time
-//! │       └── zarr.json
-//! └── meta/
-//!     ├── subject
-//!     ├── session_id
-//!     ├── start_time
-//!     └── notes
+//! ├── EMG/
+//! │   ├── data           [N × C] float32 (samples × channels)
+//! │   ├── time           [N] float64 (LSL timestamps)
+//! │   ├── aligned_time   [N] float64 (synchronized, created by lsl-sync)
+//! │   └── zarr.json      (stream metadata and attributes)
+//! ├── EEG/
+//! │   ├── data
+//! │   ├── time
+//! │   ├── aligned_time
+//! │   └── zarr.json
+//! └── zarr.json          (root metadata)
 //! ```
 //!
 //! # Library Usage

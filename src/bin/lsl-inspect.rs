@@ -85,44 +85,13 @@ fn main() -> Result<()> {
 
     let store = Arc::new(FilesystemStore::new(&args.file_path)?);
 
-    // Inspect global metadata from /meta/.zattrs
-    match read_group_attributes(&store, "/meta") {
-        Ok(meta_attrs) => {
-            println!("GLOBAL METADATA");
-            for (key, value) in meta_attrs.as_object().unwrap_or(&serde_json::Map::new()) {
-                let value_str = if value.is_string() {
-                    value.as_str().unwrap_or("").to_string()
-                } else {
-                    value.to_string()
-                };
-
-                println!(
-                    "  ├─ {}: {}",
-                    key,
-                    if value_str.len() > 100 {
-                        format!("{}...", &value_str[..100])
-                    } else {
-                        value_str
-                    }
-                );
-            }
-            println!();
-        }
-        Err(e) => {
-            if args.verbose {
-                println!("WARNING: No global metadata found: {}", e);
-                println!();
-            }
-        }
-    }
-
-    // Inspect streams
-    let streams_path = PathBuf::from(&args.file_path).join("streams");
+    // Inspect streams (now at zarr root)
+    let streams_path = PathBuf::from(&args.file_path);
     let mut stream_count = 0;
     let mut total_samples = 0;
 
     if streams_path.exists() && streams_path.is_dir() {
-        // Count streams first
+        // Count streams first (exclude zarr.json file)
         for entry in std::fs::read_dir(&streams_path)? {
             if entry?.file_type()?.is_dir() {
                 stream_count += 1;
@@ -156,7 +125,7 @@ fn main() -> Result<()> {
 
                 println!("{} {}", prefix, stream_name);
 
-                let stream_path = format!("/streams/{}", stream_name);
+                let stream_path = format!("/{}", stream_name);
 
                 // Show data array info
                 let data_array_path = format!("{}/data", stream_path);
@@ -216,7 +185,7 @@ fn main() -> Result<()> {
                     _ => {}
                 }
 
-                // Show attributes from /streams/<stream_name>/zarr.json (stream group attributes)
+                // Show attributes from /<stream_name>/zarr.json (stream group attributes)
                 if let Ok(attrs) = read_group_attributes(&store, &stream_path) {
                     for (attr_name, parsed) in attrs.as_object().unwrap_or(&serde_json::Map::new()) {
                         if parsed.is_object() {
