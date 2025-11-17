@@ -30,6 +30,9 @@
 //! # Trim only start or end
 //! lsl-sync experiment.zarr --trim-start
 //! lsl-sync experiment.zarr --trim-end
+//!
+//! # Only process specific streams (auto-skips invalid streams)
+//! lsl-sync experiment.zarr --stream VHI_Control --stream VHI_Predict
 //! ```
 //!
 //! # Alignment Modes
@@ -107,6 +110,10 @@ struct Args {
     /// Verbose output (show detailed stream information)
     #[arg(short, long)]
     verbose: bool,
+
+    /// Only process specific streams (can be specified multiple times)
+    #[arg(long)]
+    stream: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -116,6 +123,45 @@ struct StreamData {
     sample_count: usize,
     nominal_srate: f64,  // 0.0 for irregular streams
     is_irregular: bool,  // true if nominal_srate == 0.0
+}
+
+#[derive(Debug, PartialEq)]
+enum ValidationResult {
+    Valid,
+    InvalidTimestamps(String),  // Reason for invalidity
+    InsufficientSamples(String),
+}
+
+/// Validate stream data for synchronization
+fn validate_stream(stream: &StreamData) -> ValidationResult {
+    // Check for empty stream
+    if stream.sample_count == 0 {
+        return ValidationResult::InsufficientSamples(
+            "No samples recorded".to_string()
+        );
+    }
+
+    // Get first and last timestamps
+    let first_ts = stream.timestamps.first().copied().unwrap_or(0.0);
+    let last_ts = stream.timestamps.last().copied().unwrap_or(0.0);
+
+    // Check for invalid timestamps (suspiciously low values indicating uninitialized data)
+    // LSL timestamps are typically large values (seconds since system boot)
+    if first_ts < 1.0 {
+        return ValidationResult::InvalidTimestamps(
+            format!("First timestamp too low: {:.6}s (likely uninitialized data)", first_ts)
+        );
+    }
+
+    // Check for duplicate timestamps (all same value = likely bogus)
+    // Only flag if multiple samples AND all timestamps are identical
+    if stream.sample_count > 1 && (last_ts - first_ts).abs() < 0.001 {
+        return ValidationResult::InvalidTimestamps(
+            format!("All timestamps identical: {:.6}s (likely bogus data)", first_ts)
+        );
+    }
+
+    ValidationResult::Valid
 }
 
 fn main() -> Result<()> {
@@ -139,18 +185,18 @@ fn main() -> Result<()> {
 
     // Read all streams
     println!("Reading streams...");
-    let streams = read_streams(&store, &args.zarr_file)?;
+    let all_streams = read_streams(&store, &args.zarr_file)?;
 
-    if streams.is_empty() {
+    if all_streams.is_empty() {
         println!("WARNING: No streams found in Zarr file");
         return Ok(());
     }
 
-    let regular_count = streams.iter().filter(|s| !s.is_irregular).count();
-    let irregular_count = streams.len() - regular_count;
+    let regular_count = all_streams.iter().filter(|s| !s.is_irregular).count();
+    let irregular_count = all_streams.len() - regular_count;
     println!("\tFound {} stream(s): {} regular, {} irregular",
-             streams.len(), regular_count, irregular_count);
-    for stream in &streams {
+             all_streams.len(), regular_count, irregular_count);
+    for stream in &all_streams {
         let stream_type = if stream.is_irregular { "irregular" } else { "regular" };
         if args.verbose {
             let first_ts = stream.timestamps.first().unwrap_or(&0.0);
@@ -163,6 +209,57 @@ fn main() -> Result<()> {
             println!("\t- {} ({}): {} samples", stream.name, stream_type, stream.sample_count);
         }
     }
+    println!();
+
+    // Filter streams based on --stream flag and validation
+    println!("Validating streams...");
+    let mut streams = Vec::new();
+    let mut skipped_streams = Vec::new();
+
+    for stream in all_streams {
+        // Check if stream is in the user-specified list (if provided)
+        let user_selected = args.stream.is_empty() || args.stream.contains(&stream.name);
+
+        if !user_selected {
+            skipped_streams.push((stream.name.clone(), "Not in --stream list".to_string()));
+            continue;
+        }
+
+        // Validate stream data
+        let validation = validate_stream(&stream);
+        match validation {
+            ValidationResult::Valid => {
+                streams.push(stream);
+            }
+            ValidationResult::InvalidTimestamps(reason) => {
+                skipped_streams.push((stream.name.clone(), reason));
+            }
+            ValidationResult::InsufficientSamples(reason) => {
+                skipped_streams.push((stream.name.clone(), reason));
+            }
+        }
+    }
+
+    // Report skipped streams
+    if !skipped_streams.is_empty() {
+        println!("\tSkipped {} stream(s):", skipped_streams.len());
+        for (name, reason) in &skipped_streams {
+            println!("\t- {}: {}", name, reason);
+        }
+        println!();
+    }
+
+    // Check if we have any valid streams left
+    if streams.is_empty() {
+        println!("ERROR: No valid streams to synchronize after validation");
+        println!("Hint: Use --stream to manually select specific streams");
+        return Ok(());
+    }
+
+    let valid_regular_count = streams.iter().filter(|s| !s.is_irregular).count();
+    let valid_irregular_count = streams.len() - valid_regular_count;
+    println!("\tProcessing {} valid stream(s): {} regular, {} irregular",
+             streams.len(), valid_regular_count, valid_irregular_count);
     println!();
 
     // Calculate alignment offsets
@@ -583,15 +680,15 @@ fn write_aligned_timestamps(params: AlignmentParams) -> Result<()> {
     let stream_path = format!("/streams/{}", stream_name);
     let aligned_time_path = format!("{}/aligned_time", stream_path);
 
-    // Create Blosc codec
+    // Create Blosc codec with BitShuffle for optimal float64 compression
     let compression_level = BloscCompressionLevel::try_from(5u8)
         .map_err(|e| anyhow::anyhow!("Invalid compression level: {}", e))?;
     let blosc_codec = Arc::new(BloscCodec::new(
         BloscCompressor::LZ4,
         compression_level,
-        None,
-        BloscShuffleMode::NoShuffle,
-        None,
+        None,  // blocksize (auto-detect)
+        BloscShuffleMode::BitShuffle,  // BitShuffle for float64 timestamps
+        Some(8),  // typesize: 8 bytes for float64
     )?);
 
     let array = ArrayBuilder::new(

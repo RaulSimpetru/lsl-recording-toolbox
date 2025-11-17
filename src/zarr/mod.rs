@@ -327,6 +327,18 @@ fn get_zarr_dtype(channel_format: lsl::ChannelFormat) -> Result<DataType> {
     }
 }
 
+/// Get typesize for Blosc compression based on LSL channel format
+fn get_blosc_typesize(channel_format: lsl::ChannelFormat) -> Option<usize> {
+    match channel_format {
+        lsl::ChannelFormat::Float32 => Some(4),  // 4 bytes
+        lsl::ChannelFormat::Double64 => Some(8),  // 8 bytes
+        lsl::ChannelFormat::Int32 => Some(4),  // 4 bytes
+        lsl::ChannelFormat::Int16 => Some(2),  // 2 bytes
+        lsl::ChannelFormat::Int8 => Some(1),   // 1 byte
+        _ => None,  // String or unsupported
+    }
+}
+
 /// Setup stream arrays (data and time) in the Zarr store
 pub fn setup_stream_arrays(
     store: &Arc<FilesystemStore>,
@@ -368,15 +380,27 @@ pub fn setup_stream_arrays(
         let channels = info.channel_count() as usize;
         let dtype = get_zarr_dtype(channel_format)?;
 
+        // Select shuffle mode based on data type for optimal compression
+        // BitShuffle: best for floating-point (EMG/EEG signals)
+        // Shuffle: best for integers
+        let shuffle_mode = match channel_format {
+            lsl::ChannelFormat::Float32 | lsl::ChannelFormat::Double64 => BloscShuffleMode::BitShuffle,
+            lsl::ChannelFormat::Int32 | lsl::ChannelFormat::Int16 | lsl::ChannelFormat::Int8 => BloscShuffleMode::Shuffle,
+            _ => BloscShuffleMode::NoShuffle, // String (not compressed anyway)
+        };
+
+        // Get typesize for Blosc (required when shuffling is enabled)
+        let typesize = get_blosc_typesize(channel_format);
+
         // Create Blosc codec with LZ4 compression (not used for String type)
         let compression_level = BloscCompressionLevel::try_from(5u8)
             .map_err(|e| anyhow::anyhow!("Invalid compression level: {}", e))?;
         let blosc_codec = Arc::new(BloscCodec::new(
             BloscCompressor::LZ4,
             compression_level,
-            None, // typesize (auto-detect)
-            BloscShuffleMode::NoShuffle,
-            None, // blocksize (auto-detect)
+            None,  // blocksize (auto-detect)
+            shuffle_mode,
+            typesize,  // typesize required for shuffling
         )?);
 
         // Select appropriate fill value and build array based on data type
@@ -441,15 +465,15 @@ pub fn setup_stream_arrays(
     let time_array = if array_exists(store, &time_path)? {
         Array::open(store.clone(), &time_path)?
     } else {
-        // Create Blosc codec with LZ4 compression for time
+        // Create Blosc codec with BitShuffle for optimal float64 timestamp compression
         let compression_level = BloscCompressionLevel::try_from(5u8)
             .map_err(|e| anyhow::anyhow!("Invalid compression level: {}", e))?;
         let blosc_codec = Arc::new(BloscCodec::new(
             BloscCompressor::LZ4,
             compression_level,
-            None, // typesize (auto-detect)
-            BloscShuffleMode::NoShuffle,
-            None, // blocksize (auto-detect)
+            None,  // blocksize (auto-detect)
+            BloscShuffleMode::BitShuffle,  // BitShuffle for float64 timestamps
+            Some(8),  // typesize: 8 bytes for float64
         )?);
 
         let array = ArrayBuilder::new(

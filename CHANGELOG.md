@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2025-11-17
+
+### Added
+
+- Blosc BitShuffle compression for optimal data storage
+  - Automatic shuffle mode selection based on data type:
+    - BitShuffle for Float32/Float64 (EMG/EEG signals) - provides 4-8x compression for high-frequency physiological data
+    - Byte shuffle for Int8/Int16/Int32 data types
+    - No shuffle for String data
+  - Proper typesize configuration for all data types (1, 2, 4, or 8 bytes)
+  - Applied to both data arrays and timestamp arrays for maximum compression efficiency
+  - Significant disk space savings: 0.5-2 GB/hour per stream (vs 4-8 GB/hour without shuffling) for 2-10kHz EMG data
+- Automatic stream validation in `lsl-sync`
+  - Detects and skips streams with invalid timestamps (< 1.0s indicating uninitialized data)
+  - Identifies streams with identical timestamps (bogus/placeholder data)
+  - Skips completely empty streams (0 samples)
+  - Provides clear warning messages for automatically skipped streams
+- Manual stream selection with `--stream` flag in `lsl-sync`
+  - Can be specified multiple times to select specific streams: `--stream EMG --stream EEG`
+  - Consistent with `lsl-inspect` interface
+  - Useful for manual override when automatic validation needs adjustment
+
+### Changed
+
+- Improved irregular stream validation logic
+  - Removed overly restrictive minimum sample count criterion (previously required 3+ samples)
+  - Now accepts any irregular stream with valid, non-identical timestamps
+  - Better support for legitimate low-event streams (e.g., start/stop markers with only 2 events)
+  - Validation focuses on data quality issues rather than arbitrary sample counts
+
+### Fixed
+
+- Blosc shuffling now works correctly with proper parameter ordering
+  - Fixed BloscCodec::new parameter order: (compressor, level, blocksize, shuffle_mode, typesize)
+  - Added helper function `get_blosc_typesize()` to map LSL channel formats to correct byte sizes
+
 ## [1.4.0] - 2025-11-16
 
 ### Added
