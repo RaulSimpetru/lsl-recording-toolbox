@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2025-11-24
+
+### Fixed
+
+- **Critical fix**: String stream recording now uses correct LSL pull method
+  - Changed from `pull_sample_buf()` to `pull_sample()` for String channel format
+  - `pull_sample_buf()` does not work correctly with `Vec<String>` buffers
+  - Ensures reliable recording of event markers, triggers, and annotations
+  - Added error handling with warnings for failed string sample pulls
+  - Prevents recording failures for string-based event streams
+
 ## [1.6.0] - 2025-11-17
 
 ### Added

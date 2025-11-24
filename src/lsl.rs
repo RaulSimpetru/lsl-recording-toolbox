@@ -167,7 +167,28 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
                 SampleBuffer::Int32(buf) => pull_and_record!(buf, add_sample_slice_i32),
                 SampleBuffer::Int16(buf) => pull_and_record!(buf, add_sample_slice_i16),
                 SampleBuffer::Int8(buf) => pull_and_record!(buf, add_sample_slice_i8),
-                SampleBuffer::String(buf) => pull_and_record!(buf, add_sample_slice_string),
+                SampleBuffer::String(buf) => {
+                    // String streams require special handling - use pull_sample() instead of pull_sample_buf()
+                    // pull_sample_buf() doesn't work correctly with Vec<String>
+                    match <lsl::StreamInlet as Pullable<String>>::pull_sample(&inl, pull_timeout) {
+                        Ok((sample_data, ts)) => {
+                            if ts != 0.0 {
+                                *buf = sample_data; // Update the buffer with the pulled data
+                                if let Some(ref mut writer) = zarr_writer {
+                                    writer.add_sample_slice_string(&buf, ts);
+                                }
+                            }
+                            ts
+                        }
+                        Err(e) => {
+                            // Log error but don't fail - string streams may have no data
+                            if !params.quiet {
+                                eprintln!("Warning: Failed to pull string sample: {}", e);
+                            }
+                            0.0
+                        }
+                    }
+                }
             };
 
             if ts != 0.0 {
