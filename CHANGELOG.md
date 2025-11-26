@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2025-11-26
+
+### Changed
+
+- **GitHub Actions workflow improvement**: Binary detection is now dynamic
+  - Windows: Uses PowerShell `Select-String` to extract binary names from Cargo.toml
+  - Unix: Uses `grep` and `sed` to parse `[[bin]]` sections
+  - No longer requires manual workflow updates when adding new tools
+  - All binaries defined in Cargo.toml are automatically included in release artifacts
+
 ## [1.8.0] - 2025-11-26
 
 ### Added

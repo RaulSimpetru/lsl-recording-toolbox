@@ -76,24 +76,24 @@ jobs:
 
     - name: Copy binaries (Windows)
       if: matrix.os == 'windows-latest'
-      shell: cmd
+      shell: powershell
       run: |
-        copy target\${{ matrix.target }}\release\lsl-recorder.exe artifacts\
-        copy target\${{ matrix.target }}\release\lsl-multi-recorder.exe artifacts\
-        copy target\${{ matrix.target }}\release\lsl-sync.exe artifacts\
-        copy target\${{ matrix.target }}\release\lsl-validate.exe artifacts\
-        copy target\${{ matrix.target }}\release\lsl-inspect.exe artifacts\
-        copy target\${{ matrix.target }}\release\lsl-dummy-stream.exe artifacts\
+        # Extract binary names from Cargo.toml
+        $binaries = Select-String -Path Cargo.toml -Pattern 'name = "(lsl-[^"]+)"' | ForEach-Object { $_.Matches.Groups[1].Value }
+        foreach ($binary in $binaries) {
+          Copy-Item "target\${{ matrix.target }}\release\${binary}.exe" "artifacts\"
+          Write-Host "Copied ${binary}.exe"
+        }
 
     - name: Copy binaries (Unix)
       if: matrix.os != 'windows-latest'
       run: |
-        cp target/${{ matrix.target }}/release/lsl-recorder artifacts/
-        cp target/${{ matrix.target }}/release/lsl-multi-recorder artifacts/
-        cp target/${{ matrix.target }}/release/lsl-sync artifacts/
-        cp target/${{ matrix.target }}/release/lsl-validate artifacts/
-        cp target/${{ matrix.target }}/release/lsl-inspect artifacts/
-        cp target/${{ matrix.target }}/release/lsl-dummy-stream artifacts/
+        # Extract binary names from Cargo.toml
+        binaries=$(grep -A1 '^\[\[bin\]\]' Cargo.toml | grep 'name = ' | sed 's/.*name = "\([^"]*\)".*/\1/')
+        for binary in $binaries; do
+          cp "target/${{ matrix.target }}/release/$binary" artifacts/
+          echo "Copied $binary"
+        done
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
