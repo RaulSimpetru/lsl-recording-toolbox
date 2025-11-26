@@ -1,6 +1,6 @@
 [package]
 name = "lsl-recording-toolbox"
-version = "1.7.0"
+version = "1.8.0"
 edition = "2024"
 description = "Comprehensive toolkit for recording Lab Streaming Layer (LSL) data streams to Zarr format with multi-stream synchronization"
 license = "GPL-3.0-or-later"
@@ -53,3 +53,7 @@ path = "src/bin/lsl-multi-recorder.rs"
 [[bin]]
 name = "lsl-sync"
 path = "src/bin/lsl-sync.rs"
+
+[[bin]]
+name = "lsl-replay"
+path = "src/bin/lsl-replay.rs"

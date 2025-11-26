@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2025-11-26
+
+### Added
+
+- **New tool: `lsl-replay`** - Replay recorded LSL streams from Zarr files as live LSL streams
+  - List available streams in a Zarr file with `--list` flag
+  - Continuous looping enabled by default (use `--no-loop` to disable)
+  - Playback speed control with `--speed` parameter (1.0 = real-time, 2.0 = 2x faster, 0.5 = half speed)
+  - Preserves original inter-sample timing from recorded timestamps
+  - Support for all data formats (Float32, Float64, Int32, Int16, Int8, String)
+  - Custom output stream name support with `--output-name` parameter
+  - Seamless looping without timestamp discontinuities
+  - Supports both regular streams (fixed sample rate) and irregular streams (event markers)
+  - Perfect for testing pipelines, replaying experiments, and debugging
+
 ## [1.7.0] - 2025-11-24
 
 ### Fixed
