@@ -1,15 +1,16 @@
-//! LSL Dummy Stream - Generate test LSL streams with sine wave data
+//! LSL Dummy Stream - Generate test LSL streams with sine wave or noise data
 //!
-//! This tool generates configurable LSL streams with sine wave data for testing
-//! and development of recording pipelines.
+//! This tool generates configurable LSL streams with sine wave or random noise data
+//! for testing and development of recording pipelines.
 //!
 //! # Features
 //!
-//! - Generate sine wave test streams
+//! - Generate sine wave test streams (default)
+//! - Generate random noise streams (optional)
 //! - Configurable channel count and sample rate
 //! - Customizable stream name, type, and source ID
 //! - Adjustable chunk size for streaming
-//! - Frequency range configuration per channel
+//! - Frequency range configuration per channel (for sine wave mode)
 //! - Multiple data types supported (float32, float64, int32, etc.)
 //! - Verbose output mode
 //!
@@ -40,15 +41,22 @@
 //!
 //! # Verbose output
 //! lsl-dummy-stream --verbose
+//!
+//! # Generate random noise stream
+//! lsl-dummy-stream --noise --name "NoiseTest"
 //! ```
 //!
 //! # Signal Generation
 //!
-//! Generates sine waves with:
+//! By default, generates sine waves with:
 //! - Each channel has a different frequency
 //! - Frequencies linearly spaced across specified range
 //! - Continuous phase-coherent output
 //! - Realistic timing and chunk delivery
+//!
+//! With `--noise` flag, generates random noise:
+//! - Uniform random values in range [-1, 1] (scaled for data type)
+//! - Independent samples per channel
 
 use anyhow::Result;
 use clap::Parser;
@@ -98,6 +106,13 @@ struct Args {
 
     #[arg(short = 'v', long = "verbose", help = "Verbose output")]
     verbose: bool,
+
+    #[arg(
+        long = "noise",
+        help = "Generate random noise instead of sine waves",
+        default_value = "false"
+    )]
+    noise: bool,
 }
 
 fn parse_freq_range(freq_range: &str) -> Result<(f64, f64)> {
@@ -166,10 +181,18 @@ fn main() -> Result<()> {
     println!("Channels:\t{}", args.channels);
     println!("Sample rate:\t{} Hz", args.sample_rate);
     println!("Chunk size:\t{} samples", args.chunk_size);
-    println!("Freq. range:\t{:.1} - {:.1} Hz", min_freq, max_freq);
+    if args.noise {
+        println!("Signal type:\tRandom noise");
+    } else {
+        println!("Freq. range:\t{:.1} - {:.1} Hz", min_freq, max_freq);
+    }
     println!("Data type:\t{:?}", channel_format);
     println!();
-    println!("Starting continuous sine wave generation...");
+    if args.noise {
+        println!("Starting continuous noise generation...");
+    } else {
+        println!("Starting continuous sine wave generation...");
+    }
     println!("Press Ctrl+C to stop");
     println!();
 
@@ -182,7 +205,7 @@ fn main() -> Result<()> {
             .collect()
     };
 
-    if args.verbose {
+    if args.verbose && !args.noise {
         println!("Channel frequencies:");
         for (i, freq) in frequencies.iter().enumerate() {
             println!("\tChannel {}: {:.2} Hz", i + 1, freq);
@@ -197,8 +220,8 @@ fn main() -> Result<()> {
     let mut next_chunk_time = start_time;
 
    macro_rules! generate_and_push_chunk {
-        ($ty:ty, $scale:expr, $convert:expr, $outlet:expr, $args:expr, 
-        $sample_count:expr, $frequencies:expr) => {{
+        ($ty:ty, $scale:expr, $convert:expr, $outlet:expr, $args:expr,
+        $sample_count:expr, $frequencies:expr, $noise:expr) => {{
             let mut chunk: Vec<Vec<$ty>> = Vec::with_capacity($args.chunk_size as usize);
 
             for sample_idx in 0..$args.chunk_size {
@@ -207,13 +230,22 @@ fn main() -> Result<()> {
                     / $args.sample_rate;
 
                 let mut sample: Vec<$ty> = Vec::with_capacity($args.channels as usize);
-                for freq in &$frequencies {
-                    // Varying amplitude: 0.5 + 0.3 * sin(2π * 0.1 * freq * t)
-                    let amplitude =
-                        0.5 + 0.3 * (2.0 * std::f64::consts::PI * 0.1 * freq * sample_time).sin();
-                    let value_f64 = amplitude * (2.0 * std::f64::consts::PI * freq * sample_time).sin();
-                    let value = $convert(value_f64 * $scale);
-                    sample.push(value);
+                if $noise {
+                    // Generate random noise in range [-1, 1]
+                    for _ in 0..$args.channels {
+                        let value_f64 = fastrand::f64() * 2.0 - 1.0;
+                        let value = $convert(value_f64 * $scale);
+                        sample.push(value);
+                    }
+                } else {
+                    for freq in &$frequencies {
+                        // Varying amplitude: 0.5 + 0.3 * sin(2π * 0.1 * freq * t)
+                        let amplitude =
+                            0.5 + 0.3 * (2.0 * std::f64::consts::PI * 0.1 * freq * sample_time).sin();
+                        let value_f64 = amplitude * (2.0 * std::f64::consts::PI * freq * sample_time).sin();
+                        let value = $convert(value_f64 * $scale);
+                        sample.push(value);
+                    }
                 }
                 chunk.push(sample);
             }
@@ -234,7 +266,8 @@ fn main() -> Result<()> {
                     outlet,
                     args,
                     sample_count,
-                    frequencies
+                    frequencies,
+                    args.noise
                 );
             }
             lsl::ChannelFormat::Int16 => {
@@ -245,7 +278,8 @@ fn main() -> Result<()> {
                     outlet,
                     args,
                     sample_count,
-                    frequencies
+                    frequencies,
+                    args.noise
                 );
             }
             _ => unreachable!("Only Float32 and Int16 are supported"),
