@@ -10,6 +10,7 @@ categories = ["science", "command-line-utilities"]
 readme = "README.md"
 repository = "https://github.com/RaulSimpetru/lsl-recording-toolbox"
 homepage = "https://github.com/RaulSimpetru/lsl-recording-toolbox"
+default-run = "lsl-toolbox"
 
 [dependencies]
 lsl = {git = "https://github.com/labstreaminglayer/liblsl-rust.git", rev = "afa1d251674591c11ebc06070de60914b6dafccf"}
@@ -29,6 +30,12 @@ fastrand = "2.0"
 fs2 = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 hostname = "0.3"
+ratatui = "0.29"
+crossterm = "0.28"
+
+[[bin]]
+name = "lsl-toolbox"
+path = "src/main.rs"
 
 [[bin]]
 name = "lsl-recorder"
