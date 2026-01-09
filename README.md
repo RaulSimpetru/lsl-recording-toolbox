@@ -56,6 +56,24 @@ set PYLSL_LIB=C:\path\to\lsl.dll
 
 ## Quick Start
 
+### Interactive TUI Launcher
+
+The easiest way to use the toolbox is through the interactive TUI:
+
+```bash
+# Launch the TUI (default when running without arguments)
+cargo run --release
+
+# Or run the built binary directly
+./target/release/lsl-toolbox
+```
+
+The TUI provides:
+- Arrow key navigation to select tools
+- Form-based configuration with typed fields
+- Live command preview
+- Process output display
+
 ### Single Stream Recording
 
 ```bash
@@ -102,6 +120,40 @@ set PYLSL_LIB=C:\path\to\lsl.dll
 ```
 
 ## Tools
+
+### lsl-toolbox (TUI Launcher)
+
+Interactive terminal UI for selecting and configuring all tools in the toolbox.
+
+**Features:**
+
+- Menu-based tool selection with arrow key navigation
+- Form-based configuration with typed fields:
+  - Text fields for strings and paths
+  - Integer/float fields with validation
+  - Boolean toggle fields (ON/OFF)
+  - Dropdown select fields
+- Live command preview showing exact command being built
+- Integrated process output display
+- Esc key navigation throughout
+
+**Usage:**
+
+```bash
+# Launch TUI (default binary)
+cargo run --release
+
+# Or directly
+lsl-toolbox
+```
+
+**Controls:**
+
+- `↑↓` - Navigate menu/fields
+- `Tab` - Next field
+- `Space/Enter` - Toggle bool/select, activate Run button
+- `←→` - Cycle select options
+- `Esc` - Back/Cancel/Quit
 
 ### lsl-recorder
 
@@ -208,7 +260,7 @@ lsl-validate <file.zarr>
 
 ### lsl-dummy-stream
 
-Generate dummy LSL streams with configurable sine wave data for testing.
+Generate dummy LSL streams with configurable sine wave or noise data for testing.
 
 **Usage:**
 
@@ -222,6 +274,8 @@ Options:
   --channels <n>            Number of channels (default: 100)
   --sample-rate <hz>        Sample rate in Hz (default: 10000)
   --chunk-size <n>          Samples per chunk (default: 18)
+  --noise                   Generate random noise instead of sine waves
+  --verbose                 Show detailed output
 ```
 
 ## Zarr Store Structure
@@ -362,21 +416,34 @@ cargo test
 ## Project Structure
 
 ```bash
-lsl-recorder/
+lsl-recording-toolbox/
 ├── src/
-│   ├── main.rs              # Main lsl-recorder binary
+│   ├── main.rs              # TUI launcher (lsl-toolbox)
+│   ├── tui/                 # TUI components
+│   │   ├── mod.rs           # Module exports
+│   │   ├── app.rs           # Application state
+│   │   ├── ui.rs            # Menu/output rendering
+│   │   ├── ui_form.rs       # Form rendering
+│   │   ├── form.rs          # Form field types
+│   │   ├── tool_config.rs   # Tool configurations
+│   │   ├── events.rs        # Keyboard event handling
+│   │   └── process.rs       # Process management
+│   ├── lib.rs               # Shared library code
 │   ├── cli.rs               # CLI argument definitions
 │   ├── commands.rs          # Interactive command handler
 │   ├── lsl.rs               # LSL stream recording logic
 │   ├── zarr/                # Zarr writing and management
 │   ├── sync.rs              # Synchronization coordination
-│   └── bin/                 # Additional toolkit binaries
+│   └── bin/                 # Individual tool binaries
+│       ├── lsl-recorder.rs
 │       ├── lsl-multi-recorder.rs
 │       ├── lsl-sync.rs
 │       ├── lsl-validate.rs
 │       ├── lsl-inspect.rs
+│       ├── lsl-replay.rs
 │       └── lsl-dummy-stream.rs
 ├── examples/                # Example workflows
+├── CHANGELOG.md            # Version history
 ├── CLAUDE.md               # Detailed documentation
 └── README.md               # This file
 ```
