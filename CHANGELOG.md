@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2025-01-09
+
+### Added
+
+- **New TUI launcher (`lsl-toolbox`)** - Interactive terminal UI for tool selection and configuration
+  - Menu-based tool selection with arrow key navigation
+  - Form-based configuration for all tools with typed fields:
+    - Text fields for strings and paths
+    - Integer fields with automatic decimal truncation
+    - Float fields for numeric values
+    - Boolean toggle fields (ON/OFF display, Space/Enter to flip)
+    - Select dropdown fields with arrow key navigation
+  - Run button at end of form to execute selected tool
+  - Live command preview showing exact command being built
+  - Command preview wraps to multiple lines for long commands
+  - Process output displayed in scrollable view
+  - Esc key for all navigation (back, cancel, quit)
+  - Ctrl+C to stop running processes
+  - Set as default binary (`cargo run` launches TUI)
+
+- **`lsl-dummy-stream` noise mode** - Generate random noise instead of sine waves
+  - New `--noise` flag for random noise generation
+  - Uniform random values in [-1, 1] range (scaled for data type)
+  - Independent samples per channel
+  - Useful for testing with non-periodic signals
+
+### Changed
+
+- Individual tools remain accessible via `cargo run --bin <tool-name>`
+
 ## [1.8.2] - 2025-11-26
 
 ### Fixed
