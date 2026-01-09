@@ -3,7 +3,9 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+};
 
 /// Application events.
 #[derive(Debug)]
@@ -34,7 +36,10 @@ impl EventHandler {
     pub fn next(&self) -> Result<Event> {
         if event::poll(self.tick_rate)? {
             match event::read()? {
-                CrosstermEvent::Key(key) => Ok(Event::Key(key)),
+                // Only handle key press events, ignore repeats and releases
+                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                    Ok(Event::Key(key))
+                }
                 CrosstermEvent::Resize(w, h) => Ok(Event::Resize(w, h)),
                 _ => Ok(Event::Tick),
             }
