@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2025-01-09
+
+### Fixed
+
+- **TUI navigation sensitivity**: Filter out key repeat events, only responding to initial key presses
+  - Prevents overly sensitive navigation when arrow keys or Tab are held down
+  - Fixes Tab jumping 2 fields instead of 1 on Windows
+
 ## [1.9.0] - 2025-01-09
 
 ### Added

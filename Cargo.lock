@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "lsl-recording-toolbox"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "chrono",
