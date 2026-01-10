@@ -228,6 +228,9 @@ fn render_field(frame: &mut Frame, field: &super::form::FormField, x: u16, y: u1
         FieldType::Integer | FieldType::Float | FieldType::Text => {
             render_text_field(frame, field, input_x, y, input_width, is_active);
         }
+        FieldType::Path { .. } => {
+            render_path_field(frame, field, input_x, y, input_width, is_active);
+        }
     }
 }
 
@@ -368,5 +371,54 @@ fn render_text_field(frame: &mut Frame, field: &super::form::FormField, x: u16, 
         } else {
             input_style
         });
+    frame.render_widget(input, Rect { x, y, width, height: 1 });
+}
+
+/// Render a path input field with browse indicator.
+fn render_path_field(frame: &mut Frame, field: &super::form::FormField, x: u16, y: u16, width: u16, is_active: bool) {
+    let input_style = if is_active {
+        Style::default().fg(Color::Yellow).bg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    // Build input display
+    let value = &field.value;
+    let display_value = if value.is_empty() && !is_active {
+        // Show hint for empty inactive fields
+        field.hint.clone()
+    } else {
+        value.clone()
+    };
+
+    // Reserve space for browse indicator
+    let browse_indicator = " [Space]";
+    let browse_width = if is_active { browse_indicator.len() } else { 0 };
+    let max_display = width.saturating_sub(2 + browse_width as u16) as usize;
+
+    let truncated = if display_value.len() > max_display {
+        // Show end of path when truncating
+        format!("...{}", &display_value[display_value.len().saturating_sub(max_display.saturating_sub(3))..])
+    } else {
+        display_value
+    };
+
+    let spans = if is_active {
+        vec![
+            Span::styled(format!("[{}]", truncated), input_style),
+            Span::styled(browse_indicator, Style::default().fg(Color::Cyan)),
+        ]
+    } else {
+        vec![Span::styled(
+            format!("[{}]", truncated),
+            if value.is_empty() {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                input_style
+            },
+        )]
+    };
+
+    let input = Paragraph::new(Line::from(spans));
     frame.render_widget(input, Rect { x, y, width, height: 1 });
 }

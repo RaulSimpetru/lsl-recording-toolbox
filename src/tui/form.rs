@@ -13,6 +13,11 @@ pub enum FieldType {
     Bool,
     /// Selection from a list of options (Left/Right to cycle)
     Select(Vec<String>),
+    /// File or directory path (Space/Enter to open browser)
+    Path {
+        /// If true, select directories; if false, select files
+        select_dir: bool,
+    },
 }
 
 /// A single form field with label, value, and metadata.
@@ -135,6 +140,40 @@ impl FormField {
         }
     }
 
+    /// Create a file path field (opens file browser on Space/Enter).
+    pub fn file_path(name: &str, label: &str, default: &str, required: bool, hint: &str) -> Self {
+        let value = default.to_string();
+        let cursor_pos = value.len();
+        Self {
+            name: name.to_string(),
+            label: label.to_string(),
+            value,
+            default: default.to_string(),
+            required,
+            hint: hint.to_string(),
+            cursor_pos,
+            field_type: FieldType::Path { select_dir: false },
+            select_idx: 0,
+        }
+    }
+
+    /// Create a directory path field (opens directory browser on Space/Enter).
+    pub fn dir_path(name: &str, label: &str, default: &str, required: bool, hint: &str) -> Self {
+        let value = default.to_string();
+        let cursor_pos = value.len();
+        Self {
+            name: name.to_string(),
+            label: label.to_string(),
+            value,
+            default: default.to_string(),
+            required,
+            hint: hint.to_string(),
+            cursor_pos,
+            field_type: FieldType::Path { select_dir: true },
+            select_idx: 0,
+        }
+    }
+
     /// Toggle boolean value.
     pub fn toggle_bool(&mut self) {
         if self.field_type == FieldType::Bool {
@@ -208,8 +247,18 @@ impl FormField {
     pub fn accepts_text_input(&self) -> bool {
         matches!(
             self.field_type,
-            FieldType::Text | FieldType::Integer | FieldType::Float
+            FieldType::Text | FieldType::Integer | FieldType::Float | FieldType::Path { .. }
         )
+    }
+
+    /// Check if this field is a path field that can open a browser.
+    pub fn is_path_field(&self) -> bool {
+        matches!(self.field_type, FieldType::Path { .. })
+    }
+
+    /// Check if this path field selects directories (vs files).
+    pub fn selects_directory(&self) -> bool {
+        matches!(self.field_type, FieldType::Path { select_dir: true })
     }
 }
 

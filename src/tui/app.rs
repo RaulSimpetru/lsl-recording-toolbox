@@ -3,8 +3,30 @@
 use std::env;
 use std::path::PathBuf;
 
+use super::file_browser::FileBrowserState;
 use super::tab::TabState;
 use super::tool_config;
+
+/// Category for grouping tools in the menu.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ToolCategory {
+    Recording,
+    Analysis,
+    PostProcessing,
+    Development,
+}
+
+impl ToolCategory {
+    /// Display name for the category header.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ToolCategory::Recording => "Recording",
+            ToolCategory::Analysis => "Analysis",
+            ToolCategory::PostProcessing => "Post-Processing",
+            ToolCategory::Development => "Development",
+        }
+    }
+}
 
 /// Metadata for a tool in the toolbox.
 #[derive(Clone)]
@@ -15,44 +37,57 @@ pub struct ToolMetadata {
     pub binary: &'static str,
     /// Short description of what the tool does
     pub description: &'static str,
+    /// Category for menu grouping
+    pub category: ToolCategory,
 }
 
-/// All available tools in the toolbox.
+/// All available tools in the toolbox, ordered by category.
 pub const TOOLS: &[ToolMetadata] = &[
+    // Recording
     ToolMetadata {
         name: "LSL Recorder",
         binary: "lsl-recorder",
         description: "Record a single LSL stream to Zarr format",
+        category: ToolCategory::Recording,
     },
     ToolMetadata {
         name: "LSL Multi-Recorder",
         binary: "lsl-multi-recorder",
         description: "Record multiple LSL streams simultaneously",
+        category: ToolCategory::Recording,
     },
+    // Analysis
     ToolMetadata {
         name: "LSL Inspect",
         binary: "lsl-inspect",
         description: "Inspect Zarr recording contents and metadata",
+        category: ToolCategory::Analysis,
     },
     ToolMetadata {
         name: "LSL Validate",
         binary: "lsl-validate",
         description: "Validate recording synchronization quality",
+        category: ToolCategory::Analysis,
     },
+    // Post-Processing
     ToolMetadata {
         name: "LSL Sync",
         binary: "lsl-sync",
         description: "Synchronize timestamps across streams",
+        category: ToolCategory::PostProcessing,
     },
+    // Development
     ToolMetadata {
         name: "LSL Replay",
         binary: "lsl-replay",
         description: "Replay recorded LSL streams",
+        category: ToolCategory::Development,
     },
     ToolMetadata {
         name: "LSL Dummy Stream",
         binary: "lsl-dummy-stream",
         description: "Generate test LSL streams for development",
+        category: ToolCategory::Development,
     },
 ];
 
@@ -72,6 +107,8 @@ pub struct App {
     pub active_tab_index: Option<usize>,
     /// Confirmation dialog state
     pub close_confirmation: Option<CloseConfirmation>,
+    /// File browser state (when browsing for a path)
+    pub file_browser: Option<FileBrowserState>,
     /// User preference: don't ask before closing tabs with running processes
     pub skip_close_confirmation: bool,
     /// Whether the application should quit
@@ -88,10 +125,31 @@ impl App {
             tabs: Vec::new(),
             active_tab_index: None,
             close_confirmation: None,
+            file_browser: None,
             skip_close_confirmation: false,
             should_quit: false,
             next_tab_id: 0,
         }
+    }
+
+    /// Check if file browser is open.
+    pub fn has_file_browser(&self) -> bool {
+        self.file_browser.is_some()
+    }
+
+    /// Open file browser for a path field.
+    pub fn open_file_browser(&mut self, current_value: &str, select_dir: bool, field_index: usize) {
+        self.file_browser = Some(FileBrowserState::new(current_value, select_dir, field_index));
+    }
+
+    /// Close file browser without selecting.
+    pub fn close_file_browser(&mut self) {
+        self.file_browser = None;
+    }
+
+    /// Get the file browser mutably.
+    pub fn file_browser_mut(&mut self) -> Option<&mut FileBrowserState> {
+        self.file_browser.as_mut()
     }
 
     /// Get the currently selected tool in the menu.

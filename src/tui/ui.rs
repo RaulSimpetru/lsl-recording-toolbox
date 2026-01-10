@@ -8,9 +8,10 @@ use ratatui::{
     Frame,
 };
 
-use super::app::{App, TOOLS};
+use super::app::{App, ToolCategory, TOOLS};
 use super::tab::TabMode;
 use super::ui_dialog;
+use super::ui_file_browser;
 use super::ui_form;
 use super::ui_tabs;
 
@@ -23,8 +24,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_tab_view(frame, app);
     }
 
-    // Then render dialog overlay if needed
-    if app.has_confirmation_dialog() {
+    // Render dialog overlays (file browser has priority over close confirmation)
+    if let Some(ref browser) = app.file_browser {
+        ui_file_browser::render_file_browser(frame, browser);
+    } else if app.has_confirmation_dialog() {
         ui_dialog::render_close_confirmation(frame, app);
     }
 }
@@ -78,44 +81,58 @@ fn render_menu(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(title, chunks[0]);
 
-    // Tool list
-    let items: Vec<ListItem> = TOOLS
-        .iter()
-        .enumerate()
-        .map(|(i, tool)| {
-            let is_selected = i == app.selected_index;
-            let prefix = if is_selected { ">" } else { " " };
-            let content = Line::from(vec![
+    // Build tool list with category headers
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut current_category: Option<ToolCategory> = None;
+
+    for (i, tool) in TOOLS.iter().enumerate() {
+        // Add category header if this is a new category
+        if current_category != Some(tool.category) {
+            current_category = Some(tool.category);
+            let header = Line::from(vec![
                 Span::styled(
-                    format!("{} ", prefix),
-                    Style::default().fg(if is_selected {
-                        Color::Yellow
-                    } else {
-                        Color::DarkGray
-                    }),
-                ),
-                Span::styled(
-                    tool.name,
+                    format!("-- {} --", tool.category.display_name()),
                     Style::default()
-                        .fg(if is_selected { Color::Yellow } else { Color::White })
-                        .add_modifier(if is_selected {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                ),
-                Span::styled(
-                    format!(" - {}", tool.description),
-                    Style::default().fg(if is_selected {
-                        Color::Gray
-                    } else {
-                        Color::DarkGray
-                    }),
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]);
-            ListItem::new(content)
-        })
-        .collect();
+            items.push(ListItem::new(header));
+        }
+
+        // Add tool item
+        let is_selected = i == app.selected_index;
+        let prefix = if is_selected { ">" } else { " " };
+        let content = Line::from(vec![
+            Span::styled(
+                format!("  {} ", prefix),
+                Style::default().fg(if is_selected {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                tool.name,
+                Style::default()
+                    .fg(if is_selected { Color::Yellow } else { Color::White })
+                    .add_modifier(if is_selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            ),
+            Span::styled(
+                format!(" - {}", tool.description),
+                Style::default().fg(if is_selected {
+                    Color::Gray
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+        ]);
+        items.push(ListItem::new(content));
+    }
 
     let list = List::new(items).block(
         Block::default()

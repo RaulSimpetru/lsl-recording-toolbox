@@ -95,7 +95,60 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
         // Handle events
         match events.next()? {
             Event::Key(key) => {
-                // Handle close confirmation dialog first (highest priority)
+                // Handle file browser first (highest priority when open)
+                if app.has_file_browser() {
+                    let mut should_close = false;
+                    let mut selected_path: Option<String> = None;
+
+                    if let Some(browser) = app.file_browser_mut() {
+                        if is_esc(&key) {
+                            should_close = true;
+                        } else if is_up(&key) {
+                            browser.select_previous();
+                        } else if is_down(&key) {
+                            browser.select_next();
+                        } else if is_page_up(&key) {
+                            browser.page_up(10);
+                        } else if is_page_down(&key) {
+                            browser.page_down(10);
+                        } else if is_backspace(&key) {
+                            browser.go_up();
+                        } else if is_enter(&key) {
+                            // Enter directory or select file
+                            if let Some(path) = browser.enter_selected() {
+                                selected_path = Some(path.to_string_lossy().to_string());
+                            }
+                        } else if is_space(&key) && browser.select_dir {
+                            // Space selects current directory (only in dir mode)
+                            selected_path = Some(browser.select_current_dir().to_string_lossy().to_string());
+                        }
+                    }
+
+                    if should_close {
+                        app.close_file_browser();
+                        needs_full_redraw = true;
+                    } else if let Some(path) = selected_path {
+                        // Get field index before closing browser
+                        let field_idx = app.file_browser.as_ref().map(|b| b.field_index);
+                        app.close_file_browser();
+
+                        // Set the path in the form field
+                        if let Some(idx) = field_idx {
+                            if let Some(tab) = app.active_tab_mut() {
+                                if let Some(ref mut form) = tab.form_state {
+                                    if let Some(field) = form.fields.get_mut(idx) {
+                                        field.value = path;
+                                        field.cursor_pos = field.value.len();
+                                    }
+                                }
+                            }
+                        }
+                        needs_full_redraw = true;
+                    }
+                    continue;
+                }
+
+                // Handle close confirmation dialog (high priority)
                 if app.has_confirmation_dialog() {
                     if is_enter(&key) || key.code == KeyCode::Char('y') || key.code == KeyCode::Char('Y') {
                         app.confirm_close();
@@ -228,8 +281,15 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                                                 }
                                             }
                                         } else if let Some(field) = form.active_field() {
-                                            // Toggle bool or cycle select option (if field supports it)
-                                            if !field.accepts_text_input() {
+                                            // Check if this is a path field - open file browser
+                                            if field.is_path_field() && is_space(&key) {
+                                                let current_value = field.value.clone();
+                                                let select_dir = field.selects_directory();
+                                                let field_idx = form.active_field_idx;
+                                                app.open_file_browser(&current_value, select_dir, field_idx);
+                                                needs_full_redraw = true;
+                                            } else if !field.accepts_text_input() {
+                                                // Toggle bool or cycle select option
                                                 form.toggle_or_cycle();
                                             }
                                         }

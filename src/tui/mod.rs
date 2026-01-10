@@ -6,12 +6,14 @@
 
 pub mod app;
 pub mod events;
+pub mod file_browser;
 pub mod form;
 pub mod process;
 pub mod tab;
 pub mod tool_config;
 pub mod ui;
 pub mod ui_dialog;
+pub mod ui_file_browser;
 pub mod ui_form;
 pub mod ui_tabs;
 

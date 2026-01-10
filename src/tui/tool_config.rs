@@ -122,7 +122,7 @@ fn create_recorder_form() -> FormState {
     FormState::new("LSL Recorder", vec![
         // Required
         FormField::required("source_id", "Source ID *", "1234", "LSL stream source ID"),
-        FormField::required("output", "Output Path *", "experiment", "Zarr path (without .zarr)"),
+        FormField::dir_path("output", "Output Path *", "experiment", true, "Space to browse"),
         // Metadata
         FormField::optional("stream_name", "Stream Name", "", "Name in Zarr (defaults to source ID)"),
         FormField::optional("subject", "Subject", "", "Subject identifier"),
@@ -147,7 +147,7 @@ fn create_multi_recorder_form() -> FormState {
     FormState::new("LSL Multi-Recorder", vec![
         // Required
         FormField::required("source_ids", "Source IDs *", "", "Comma-separated source IDs"),
-        FormField::required("output", "Output Path *", "experiment", "Zarr path (without .zarr)"),
+        FormField::dir_path("output", "Output Path *", "experiment", true, "Space to browse"),
         // Metadata
         FormField::optional("stream_names", "Stream Names", "", "Comma-separated names (optional)"),
         FormField::optional("subject", "Subject", "", "Subject identifier"),
@@ -167,7 +167,7 @@ fn create_multi_recorder_form() -> FormState {
 
 fn create_inspect_form() -> FormState {
     FormState::new("LSL Inspect", vec![
-        FormField::required("file_path", "Zarr File *", "experiment.zarr", "Path to Zarr file"),
+        FormField::file_path("file_path", "Zarr File *", "", true, "Space to browse"),
         FormField::optional("stream", "Stream Filter", "", "Filter to specific stream"),
         FormField::bool_field("verbose", "Verbose", false),
     ])
@@ -175,13 +175,13 @@ fn create_inspect_form() -> FormState {
 
 fn create_validate_form() -> FormState {
     FormState::new("LSL Validate", vec![
-        FormField::required("file_path", "Zarr File *", "experiment.zarr", "Path to Zarr file(s)"),
+        FormField::file_path("file_path", "Zarr File *", "", true, "Space to browse"),
     ])
 }
 
 fn create_sync_form() -> FormState {
     FormState::new("LSL Sync", vec![
-        FormField::required("zarr_file", "Zarr File *", "experiment.zarr", "Path to Zarr file"),
+        FormField::file_path("zarr_file", "Zarr File *", "", true, "Space to browse"),
         FormField::select_field("mode", "Sync Mode", &["common-start", "first-stream", "last-stream", "absolute-zero"], 0),
         FormField::optional("streams", "Stream Filter", "", "Comma-separated streams to process"),
         FormField::bool_field("trim_start", "Trim Start", false),
@@ -193,7 +193,7 @@ fn create_sync_form() -> FormState {
 
 fn create_replay_form() -> FormState {
     FormState::new("LSL Replay", vec![
-        FormField::required("file_path", "Zarr File *", "", "Path to Zarr file"),
+        FormField::file_path("file_path", "Zarr File *", "", true, "Space to browse"),
         FormField::required("stream", "Stream Name *", "", "Stream to replay"),
         FormField::optional("output_name", "Output Name", "", "Custom output stream name"),
         FormField::float_field("speed", "Speed", 1.0, false, "Playback speed (1.0 = real-time)"),
