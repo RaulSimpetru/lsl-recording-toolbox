@@ -8,25 +8,30 @@ use ratatui::{
     Frame,
 };
 
-use super::app::App;
-use super::form::FieldType;
+use super::form::{FieldType, FormState};
 use super::tool_config;
 
-/// Render the configuration form.
-pub fn render_configure_form(frame: &mut Frame, app: &App) {
-    let form = match &app.form_state {
-        Some(f) => f,
-        None => return,
+/// Render the configuration form for a tab.
+pub fn render_configure_form_for_tab(frame: &mut Frame, area: Rect, form: &FormState, binary_name: &str) {
+    // Calculate command preview height first
+    let cmd = tool_config::build_command_preview(binary_name, form);
+    let cmd_with_prompt = format!("$ {}", cmd);
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let cmd_lines = if inner_width > 0 {
+        ((cmd_with_prompt.len() + inner_width - 1) / inner_width) as u16
+    } else {
+        1
     };
+    let bottom_height = cmd_lines + 2 + 2; // cmd lines + borders + help text
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Title
-            Constraint::Min(0),    // Form fields
-            Constraint::Length(7), // Command preview + help
+            Constraint::Length(3),            // Title
+            Constraint::Min(0),               // Form fields
+            Constraint::Length(bottom_height), // Command preview + help (auto-sized)
         ])
-        .split(frame.area());
+        .split(area);
 
     // Title
     let title = Paragraph::new(Line::from(vec![
@@ -49,24 +54,29 @@ pub fn render_configure_form(frame: &mut Frame, app: &App) {
     render_form_fields(frame, form, chunks[1]);
 
     // Bottom area: command preview + help/error
-    let binary_name = app.selected_tool().binary;
-    render_bottom_area(frame, form, chunks[2], binary_name);
+    render_bottom_area(frame, form, chunks[2], binary_name, &cmd_with_prompt);
 }
 
 /// Render the bottom area with command preview and help text.
-fn render_bottom_area(frame: &mut Frame, form: &super::form::FormState, area: Rect, binary_name: &str) {
+fn render_bottom_area(frame: &mut Frame, form: &super::form::FormState, area: Rect, _binary_name: &str, cmd_with_prompt: &str) {
+    // Calculate command preview height based on content
+    let inner_width = area.width.saturating_sub(2) as usize; // Account for borders
+    let cmd_lines = if inner_width > 0 {
+        ((cmd_with_prompt.len() + inner_width - 1) / inner_width) as u16
+    } else {
+        1
+    };
+    let cmd_height = cmd_lines + 2; // Add 2 for borders
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),    // Command preview (flexible, at least 3 lines)
-            Constraint::Length(2), // Help/error
+            Constraint::Length(cmd_height), // Command preview (auto-sized)
+            Constraint::Length(2),          // Help/error
         ])
         .split(area);
 
     // Command preview with word wrap
-    let cmd = tool_config::build_command_preview(binary_name, form);
-    let cmd_with_prompt = format!("$ {}", cmd);
-
     let cmd_preview = Paragraph::new(cmd_with_prompt)
         .style(Style::default().fg(Color::White))
         .wrap(Wrap { trim: false })
@@ -87,14 +97,17 @@ fn render_bottom_area(frame: &mut Frame, form: &super::form::FormState, area: Re
     } else {
         Paragraph::new(Line::from(vec![
             Span::styled(" [", Style::default().fg(Color::DarkGray)),
-            Span::styled("Tab/↑↓", Style::default().fg(Color::Cyan)),
+            Span::styled("Up/Dn", Style::default().fg(Color::Cyan)),
             Span::styled("] Navigate  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Space/←→", Style::default().fg(Color::Cyan)),
+            Span::styled("Space/L/R", Style::default().fg(Color::Cyan)),
             Span::styled("] Toggle  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[", Style::default().fg(Color::DarkGray)),
+            Span::styled("Tab", Style::default().fg(Color::Cyan)),
+            Span::styled("] Cycle  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::Cyan)),
-            Span::styled("] Cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled("] Close", Style::default().fg(Color::DarkGray)),
         ]))
     };
     frame.render_widget(help_or_error, chunks[1]);
@@ -112,7 +125,7 @@ fn render_form_fields(frame: &mut Frame, form: &super::form::FormState, area: Re
     // Draw border
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Fields (↑↓ or Tab to navigate) ")
+        .title(" Fields (Up/Dn to navigate) ")
         .border_style(Style::default().fg(Color::White));
     frame.render_widget(block, area);
 
@@ -160,7 +173,7 @@ fn render_form_fields(frame: &mut Frame, form: &super::form::FormState, area: Re
 
 /// Render the Run button.
 fn render_run_button(frame: &mut Frame, x: u16, y: u16, width: u16, is_active: bool) {
-    let button_text = "[ ▶ RUN ]";
+    let button_text = "[ > RUN ]";
     let padding = (width as usize).saturating_sub(button_text.len()) / 2;
     let padded = format!("{:>width$}{}", "", button_text, width = padding);
 
@@ -308,9 +321,9 @@ fn render_select_field(
     };
 
     let select = Paragraph::new(Line::from(vec![
-        Span::styled("◀ ", arrow_style),
+        Span::styled("< ", arrow_style),
         Span::styled(display_value, value_style.patch(bg_style)),
-        Span::styled(" ▶", arrow_style),
+        Span::styled(" >", arrow_style),
         Span::styled(format!(" ({}/{})", current_idx + 1, total), Style::default().fg(Color::DarkGray)),
     ]));
 
@@ -356,12 +369,4 @@ fn render_text_field(frame: &mut Frame, field: &super::form::FormField, x: u16, 
             input_style
         });
     frame.render_widget(input, Rect { x, y, width, height: 1 });
-
-    // Render cursor for active text field
-    if is_active && field.accepts_text_input() {
-        let cursor_x = x + 1 + field.cursor_pos.min(max_display) as u16;
-        if cursor_x < x + width - 1 {
-            frame.set_cursor_position((cursor_x, y));
-        }
-    }
 }

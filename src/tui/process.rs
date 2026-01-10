@@ -1,7 +1,7 @@
 //! Process management for running tools.
 
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -21,19 +21,26 @@ pub enum ProcessEvent {
     Error(String),
 }
 
-/// Manages a running child process.
+/// Manages a running child process with stdin support.
 pub struct ProcessManager {
     child: Option<Child>,
+    stdin: Option<ChildStdin>,
     event_rx: Receiver<ProcessEvent>,
 }
 
 impl ProcessManager {
     /// Spawn a tool as a child process with the given arguments.
-    pub fn spawn(tool: &ToolMetadata, args: &[&str]) -> Result<Self> {
+    /// Terminal size (columns, lines) is passed via environment variables.
+    pub fn spawn(tool: &ToolMetadata, args: &[&str], terminal_size: (u16, u16)) -> Result<Self> {
         let binary_path = find_binary(tool.binary);
+        let (cols, rows) = terminal_size;
 
         let mut child = Command::new(&binary_path)
             .args(args)
+            .env("COLUMNS", cols.to_string())
+            .env("LINES", rows.to_string())
+            .env("TERM", "xterm-256color")
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -46,6 +53,7 @@ impl ProcessManager {
                 )
             })?;
 
+        let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("stdout was piped");
         let stderr = child.stderr.take().expect("stderr was piped");
 
@@ -91,6 +99,7 @@ impl ProcessManager {
 
         Ok(Self {
             child: Some(child),
+            stdin,
             event_rx: rx,
         })
     }
@@ -100,17 +109,28 @@ impl ProcessManager {
         self.event_rx.try_recv().ok()
     }
 
+    /// Write a line to the process's stdin.
+    pub fn write_line(&mut self, line: &str) -> Result<()> {
+        if let Some(ref mut stdin) = self.stdin {
+            writeln!(stdin, "{}", line)?;
+            stdin.flush()?;
+        }
+        Ok(())
+    }
+
     /// Check if the process has exited.
     pub fn check_exit(&mut self) -> Option<Option<i32>> {
         if let Some(ref mut child) = self.child {
             match child.try_wait() {
                 Ok(Some(status)) => {
                     self.child = None;
+                    self.stdin = None;
                     Some(status.code())
                 }
                 Ok(None) => None, // Still running
                 Err(_) => {
                     self.child = None;
+                    self.stdin = None;
                     Some(None)
                 }
             }
@@ -121,6 +141,8 @@ impl ProcessManager {
 
     /// Kill the running process.
     pub fn kill(&mut self) {
+        // Drop stdin first to signal EOF to the process
+        self.stdin = None;
         if let Some(ref mut child) = self.child {
             let _ = child.kill();
             let _ = child.wait();

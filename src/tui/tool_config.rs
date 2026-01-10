@@ -106,22 +106,6 @@ pub fn build_command_preview(binary_name: &str, form: &FormState) -> String {
     }
 }
 
-/// Validate form state.
-pub fn validate_form(form: &FormState) -> Result<(), String> {
-    let missing: Vec<&str> = form
-        .fields
-        .iter()
-        .filter(|f| f.required && f.value.trim().is_empty())
-        .map(|f| f.label.as_str())
-        .collect();
-
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("Required fields missing: {}", missing.join(", ")))
-    }
-}
-
 /// Check if a string value represents "true".
 fn is_truthy(value: &str) -> bool {
     matches!(

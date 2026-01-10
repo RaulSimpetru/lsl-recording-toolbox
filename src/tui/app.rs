@@ -1,9 +1,9 @@
-//! Application state management for the TUI launcher.
+//! Application state management for the TUI launcher with multi-tab support.
 
 use std::env;
 use std::path::PathBuf;
 
-use super::form::FormState;
+use super::tab::TabState;
 use super::tool_config;
 
 /// Metadata for a tool in the toolbox.
@@ -56,35 +56,28 @@ pub const TOOLS: &[ToolMetadata] = &[
     },
 ];
 
-/// Current mode of the application.
-#[derive(Clone, PartialEq)]
-pub enum AppMode {
-    /// Browsing the tool menu
-    Menu,
-    /// Configuring tool arguments
-    Configure,
-    /// A tool is currently running
-    Running,
-    /// Tool has finished, viewing output
-    Completed,
+/// State for close confirmation dialog.
+pub struct CloseConfirmation {
+    /// Index of tab being closed
+    pub tab_index: usize,
 }
 
-/// Main application state.
+/// Main application state with multi-tab support.
 pub struct App {
-    /// Currently selected tool index
+    /// Currently selected tool index in the menu
     pub selected_index: usize,
-    /// Current application mode
-    pub mode: AppMode,
-    /// Form state for Configure mode
-    pub form_state: Option<FormState>,
-    /// Output buffer from running/completed tool
-    pub output_lines: Vec<String>,
-    /// Scroll offset for output viewing
-    pub scroll_offset: usize,
-    /// Name of the currently running/completed tool
-    pub current_tool_name: Option<String>,
+    /// All open tabs
+    pub tabs: Vec<TabState>,
+    /// Index of the currently active tab (None = in menu)
+    pub active_tab_index: Option<usize>,
+    /// Confirmation dialog state
+    pub close_confirmation: Option<CloseConfirmation>,
+    /// User preference: don't ask before closing tabs with running processes
+    pub skip_close_confirmation: bool,
     /// Whether the application should quit
     pub should_quit: bool,
+    /// Next tab ID (for unique identification)
+    next_tab_id: usize,
 }
 
 impl App {
@@ -92,16 +85,16 @@ impl App {
     pub fn new() -> Self {
         Self {
             selected_index: 0,
-            mode: AppMode::Menu,
-            form_state: None,
-            output_lines: Vec::new(),
-            scroll_offset: 0,
-            current_tool_name: None,
+            tabs: Vec::new(),
+            active_tab_index: None,
+            close_confirmation: None,
+            skip_close_confirmation: false,
             should_quit: false,
+            next_tab_id: 0,
         }
     }
 
-    /// Get the currently selected tool.
+    /// Get the currently selected tool in the menu.
     pub fn selected_tool(&self) -> &ToolMetadata {
         &TOOLS[self.selected_index]
     }
@@ -120,79 +113,126 @@ impl App {
         }
     }
 
-    /// Start running a tool.
-    pub fn start_tool(&mut self, tool_name: String) {
-        self.mode = AppMode::Running;
-        self.current_tool_name = Some(tool_name);
-        self.output_lines.clear();
-        self.scroll_offset = 0;
+    /// Check if we're in menu mode (no active tab).
+    pub fn is_in_menu(&self) -> bool {
+        self.active_tab_index.is_none()
     }
 
-    /// Mark the current tool as completed.
-    pub fn tool_completed(&mut self, exit_code: Option<i32>) {
-        self.mode = AppMode::Completed;
-        if let Some(code) = exit_code {
-            self.output_lines
-                .push(format!("\n[Process exited with code: {}]", code));
-        } else {
-            self.output_lines.push("\n[Process terminated]".to_string());
+    /// Get the currently active tab.
+    pub fn active_tab(&self) -> Option<&TabState> {
+        self.active_tab_index.and_then(|idx| self.tabs.get(idx))
+    }
+
+    /// Get the currently active tab mutably.
+    pub fn active_tab_mut(&mut self) -> Option<&mut TabState> {
+        self.active_tab_index.and_then(|idx| self.tabs.get_mut(idx))
+    }
+
+    /// Create a new tab for the selected tool and switch to it.
+    pub fn create_tab_from_menu(&mut self) {
+        let tool = self.selected_tool();
+        let tool_index = self.selected_index;
+        let form = tool_config::create_config_form(tool_index);
+
+        let tab = TabState::new(self.next_tab_id, tool_index, tool.name, form);
+        self.next_tab_id += 1;
+
+        self.tabs.push(tab);
+        self.active_tab_index = Some(self.tabs.len() - 1);
+    }
+
+    /// Switch to next tab or menu (Tab key).
+    /// Cycles: Menu → Tab1 → Tab2 → ... → TabN → Menu
+    pub fn next_tab(&mut self) {
+        if self.tabs.is_empty() {
+            // No tabs, stay in menu
+            return;
         }
+        self.active_tab_index = match self.active_tab_index {
+            None => Some(0),                                      // Menu → first tab
+            Some(idx) if idx + 1 < self.tabs.len() => Some(idx + 1), // Next tab
+            Some(_) => None,                                      // Last tab → Menu
+        };
     }
 
-    /// Add output line from the running process.
-    pub fn add_output(&mut self, line: String) {
-        // Limit buffer to prevent memory growth
-        const MAX_LINES: usize = 10000;
-        const TRIM_AMOUNT: usize = 1000;
-        if self.output_lines.len() >= MAX_LINES {
-            self.output_lines.drain(0..TRIM_AMOUNT);
-            // Adjust scroll offset to account for removed lines
-            self.scroll_offset = self.scroll_offset.saturating_sub(TRIM_AMOUNT);
+    /// Switch to previous tab or menu (Shift+Tab).
+    /// Cycles: Menu → TabN → ... → Tab2 → Tab1 → Menu
+    pub fn prev_tab(&mut self) {
+        if self.tabs.is_empty() {
+            // No tabs, stay in menu
+            return;
         }
-        self.output_lines.push(line);
+        self.active_tab_index = match self.active_tab_index {
+            None => Some(self.tabs.len() - 1),  // Menu → last tab
+            Some(0) => None,                     // First tab → Menu
+            Some(idx) => Some(idx - 1),          // Previous tab
+        };
     }
 
-    /// Return to menu mode.
+    /// Return to menu view (for future use).
+    #[allow(dead_code)]
     pub fn return_to_menu(&mut self) {
-        self.mode = AppMode::Menu;
-        self.current_tool_name = None;
-        self.output_lines.clear();
-        self.scroll_offset = 0;
+        self.active_tab_index = None;
+        self.close_confirmation = None;
     }
 
-    /// Scroll output up.
-    pub fn scroll_up(&mut self, amount: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+    /// Request to close the active tab (may trigger confirmation dialog).
+    pub fn request_close_active_tab(&mut self) {
+        if let Some(idx) = self.active_tab_index {
+            if let Some(tab) = self.tabs.get(idx) {
+                if tab.is_running() && !self.skip_close_confirmation {
+                    self.close_confirmation = Some(CloseConfirmation { tab_index: idx });
+                } else {
+                    self.close_tab(idx);
+                }
+            }
+        }
     }
 
-    /// Scroll output down.
-    pub fn scroll_down(&mut self, amount: usize, visible_height: usize) {
-        let max_scroll = self.output_lines.len().saturating_sub(visible_height);
-        self.scroll_offset = (self.scroll_offset + amount).min(max_scroll);
+    /// Close a tab by index (kills process if running).
+    pub fn close_tab(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.tabs[index].kill_process();
+            self.tabs.remove(index);
+            self.close_confirmation = None;
+
+            if self.tabs.is_empty() {
+                self.active_tab_index = None;
+            } else if let Some(active) = self.active_tab_index {
+                if index < active {
+                    // Closed tab was before active - decrement to maintain same tab
+                    self.active_tab_index = Some(active - 1);
+                } else if index == active && active >= self.tabs.len() {
+                    // Closed the active tab and it was the last one
+                    self.active_tab_index = Some(self.tabs.len() - 1);
+                }
+                // If index > active: no adjustment needed
+                // If index == active && active < tabs.len(): next tab takes over (standard behavior)
+            }
+        }
     }
 
-    /// Check if we should auto-scroll to bottom.
-    pub fn auto_scroll(&mut self, visible_height: usize) {
-        let max_scroll = self.output_lines.len().saturating_sub(visible_height);
-        self.scroll_offset = max_scroll;
+    /// Confirm close from dialog.
+    pub fn confirm_close(&mut self) {
+        if let Some(conf) = self.close_confirmation.take() {
+            self.close_tab(conf.tab_index);
+        }
     }
 
-    /// Enter configure mode for the selected tool.
-    pub fn enter_configure_mode(&mut self) {
-        let form = tool_config::create_config_form(self.selected_index);
-        self.form_state = Some(form);
-        self.mode = AppMode::Configure;
+    /// Confirm close and set "don't ask again" preference.
+    pub fn confirm_close_dont_ask(&mut self) {
+        self.skip_close_confirmation = true;
+        self.confirm_close();
     }
 
-    /// Exit configure mode and return to menu.
-    pub fn exit_configure_mode(&mut self) {
-        self.form_state = None;
-        self.mode = AppMode::Menu;
+    /// Cancel close dialog.
+    pub fn cancel_close(&mut self) {
+        self.close_confirmation = None;
     }
 
-    /// Get configured arguments from form state.
-    pub fn get_configured_args(&self) -> Option<Vec<String>> {
-        self.form_state.as_ref().map(tool_config::form_to_args)
+    /// Check if confirmation dialog is showing.
+    pub fn has_confirmation_dialog(&self) -> bool {
+        self.close_confirmation.is_some()
     }
 }
 
@@ -203,7 +243,7 @@ impl Default for App {
 }
 
 /// Find the binary path for a tool.
-/// Checks target/release/, target/debug/, and PATH.
+/// Checks next to current executable, target/release/, target/debug/, and PATH.
 pub fn find_binary(binary_name: &str) -> PathBuf {
     // Get the directory of the current executable
     if let Ok(exe_path) = env::current_exe() {
