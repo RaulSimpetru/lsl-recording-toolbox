@@ -97,14 +97,11 @@ fn render_bottom_area(frame: &mut Frame, form: &super::form::FormState, area: Re
     } else {
         Paragraph::new(Line::from(vec![
             Span::styled(" [", Style::default().fg(Color::DarkGray)),
+            Span::styled("Ctrl+Enter", Style::default().fg(Color::Green)),
+            Span::styled("] Run  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
             Span::styled("Up/Dn", Style::default().fg(Color::Cyan)),
             Span::styled("] Navigate  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Space/L/R", Style::default().fg(Color::Cyan)),
-            Span::styled("] Toggle  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Tab", Style::default().fg(Color::Cyan)),
-            Span::styled("] Cycle  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[", Style::default().fg(Color::DarkGray)),
             Span::styled("Esc", Style::default().fg(Color::Cyan)),
             Span::styled("] Close", Style::default().fg(Color::DarkGray)),
@@ -129,9 +126,9 @@ fn render_form_fields(frame: &mut Frame, form: &super::form::FormState, area: Re
         .border_style(Style::default().fg(Color::White));
     frame.render_widget(block, area);
 
-    // Calculate visible items (fields + 1 for Run button)
+    // Calculate visible items
     let visible_height = inner_area.height as usize;
-    let total_items = form.fields.len() + 1; // +1 for Run button
+    let total_items = form.fields.len();
 
     // Adjust scroll to keep active item visible
     let scroll_offset = if form.active_field_idx >= form.scroll_offset + visible_height {
@@ -150,14 +147,6 @@ fn render_form_fields(frame: &mut Frame, form: &super::form::FormState, area: Re
         render_field(frame, field, inner_area.x, y, inner_area.width, is_active);
     }
 
-    // Render Run button if visible
-    let button_idx = form.fields.len();
-    if button_idx >= scroll_offset && button_idx < scroll_offset + visible_height {
-        let y = inner_area.y + (button_idx - scroll_offset) as u16;
-        let is_button_active = form.is_run_button_focused();
-        render_run_button(frame, inner_area.x, y, inner_area.width, is_button_active);
-    }
-
     // Scrollbar if needed
     if total_items > visible_height {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
@@ -169,27 +158,6 @@ fn render_form_fields(frame: &mut Frame, form: &super::form::FormState, area: Re
             &mut scrollbar_state,
         );
     }
-}
-
-/// Render the Run button.
-fn render_run_button(frame: &mut Frame, x: u16, y: u16, width: u16, is_active: bool) {
-    let button_text = "[ > RUN ]";
-    let padding = (width as usize).saturating_sub(button_text.len()) / 2;
-    let padded = format!("{:>width$}{}", "", button_text, width = padding);
-
-    let style = if is_active {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    };
-
-    let button = Paragraph::new(padded).style(style);
-    frame.render_widget(button, Rect { x, y, width, height: 1 });
 }
 
 /// Render a single form field.

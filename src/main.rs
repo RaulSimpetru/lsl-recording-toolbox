@@ -21,9 +21,9 @@ use crossterm::event::KeyCode;
 use tui::{
     app::TOOLS,
     events::{
-        is_backspace, is_ctrl_c, is_delete, is_down, is_end, is_enter, is_esc, is_home, is_left,
-        is_page_down, is_page_up, is_right, is_shift_tab, is_space, is_tab, is_up, Event,
-        EventHandler,
+        is_backspace, is_ctrl_c, is_ctrl_enter, is_delete, is_down, is_end, is_enter, is_esc,
+        is_home, is_left, is_page_down, is_page_up, is_right, is_shift_tab, is_space, is_tab,
+        is_up, Event, EventHandler,
     },
     process::{ProcessEvent, ProcessManager},
     tab::TabMode,
@@ -196,7 +196,40 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                     if let Some(tab) = app.active_tab_mut() {
                         match tab.mode {
                             TabMode::Configure => {
-                                if is_esc(&key) {
+                                if is_ctrl_enter(&key) {
+                                    // Ctrl+Enter runs the tool from anywhere in the form
+                                    if let Some(ref mut form) = tab.form_state {
+                                        match form.validate() {
+                                            Ok(()) => {
+                                                let tool = &TOOLS[tab.tool_index];
+                                                let args = tool_config::form_to_args(form);
+                                                let args_refs: Vec<&str> =
+                                                    args.iter().map(|s| s.as_str()).collect();
+
+                                                match ProcessManager::spawn(tool, &args_refs, (term_width, term_height)) {
+                                                    Ok(pm) => {
+                                                        let cmd = if args.is_empty() {
+                                                            tool.binary.to_string()
+                                                        } else {
+                                                            format!("{} {}", tool.binary, args.join(" "))
+                                                        };
+                                                        tab.start_running(pm, cmd);
+                                                        mode_changed = true;
+                                                    }
+                                                    Err(e) => {
+                                                        tab.form_state = None;
+                                                        tab.add_output(format!("Error: {}", e));
+                                                        tab.complete(None);
+                                                        mode_changed = true;
+                                                    }
+                                                }
+                                            }
+                                            Err(msg) => {
+                                                form.error_message = Some(msg);
+                                            }
+                                        }
+                                    }
+                                } else if is_esc(&key) {
                                     // Close tab or return to menu if only tab
                                     if app.tabs.len() == 1 {
                                         app.close_tab(0);
@@ -245,51 +278,17 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                                     if let Some(ref mut form) = tab.form_state {
                                         form.delete_char();
                                     }
-                                } else if is_space(&key) || is_enter(&key) {
-                                    // Check if Run button is focused
+                                } else if is_space(&key) {
+                                    // Space: open file browser for path fields, or toggle for bool/select
                                     if let Some(ref mut form) = tab.form_state {
-                                        if form.is_run_button_focused() && is_enter(&key) {
-                                            // Run the tool
-                                            match form.validate() {
-                                                Ok(()) => {
-                                                    let tool = &TOOLS[tab.tool_index];
-                                                    let args = tool_config::form_to_args(form);
-                                                    let args_refs: Vec<&str> =
-                                                        args.iter().map(|s| s.as_str()).collect();
-
-                                                    match ProcessManager::spawn(tool, &args_refs, (term_width, term_height)) {
-                                                        Ok(pm) => {
-                                                            // Build command string for display
-                                                            let cmd = if args.is_empty() {
-                                                                tool.binary.to_string()
-                                                            } else {
-                                                                format!("{} {}", tool.binary, args.join(" "))
-                                                            };
-                                                            tab.start_running(pm, cmd);
-                                                            mode_changed = true;
-                                                        }
-                                                        Err(e) => {
-                                                            tab.form_state = None;
-                                                            tab.add_output(format!("Error: {}", e));
-                                                            tab.complete(None);
-                                                            mode_changed = true;
-                                                        }
-                                                    }
-                                                }
-                                                Err(msg) => {
-                                                    form.error_message = Some(msg);
-                                                }
-                                            }
-                                        } else if let Some(field) = form.active_field() {
-                                            // Check if this is a path field - open file browser
-                                            if field.is_path_field() && is_space(&key) {
+                                        if let Some(field) = form.active_field() {
+                                            if field.is_path_field() {
                                                 let current_value = field.value.clone();
                                                 let select_dir = field.selects_directory();
                                                 let field_idx = form.active_field_idx;
                                                 app.open_file_browser(&current_value, select_dir, field_idx);
                                                 needs_full_redraw = true;
                                             } else if !field.accepts_text_input() {
-                                                // Toggle bool or cycle select option
                                                 form.toggle_or_cycle();
                                             }
                                         }

@@ -35,16 +35,20 @@ pub struct FileBrowserState {
 impl FileBrowserState {
     /// Create a new file browser starting at the given path.
     pub fn new(start_path: &str, select_dir: bool, field_index: usize) -> Self {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
         let start = if start_path.is_empty() {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            cwd
         } else {
             let p = PathBuf::from(start_path);
             if p.is_dir() {
                 p
             } else {
-                p.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| {
-                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-                })
+                // Try parent directory, but fallback to cwd if parent is empty or doesn't exist
+                p.parent()
+                    .filter(|parent| !parent.as_os_str().is_empty() && parent.is_dir())
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or(cwd)
             }
         };
 

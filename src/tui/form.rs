@@ -266,7 +266,7 @@ impl FormField {
 pub struct FormState {
     /// All fields in the form
     pub fields: Vec<FormField>,
-    /// Index of currently active/focused field (fields.len() = Run button)
+    /// Index of currently active/focused field
     pub active_field_idx: usize,
     /// Name of the tool being configured
     pub tool_name: String,
@@ -274,13 +274,6 @@ pub struct FormState {
     pub error_message: Option<String>,
     /// Scroll offset for long forms
     pub scroll_offset: usize,
-}
-
-impl FormState {
-    /// Check if the Run button is currently focused.
-    pub fn is_run_button_focused(&self) -> bool {
-        self.active_field_idx >= self.fields.len()
-    }
 }
 
 #[allow(dead_code)]
@@ -415,16 +408,15 @@ impl FormState {
         }
     }
 
-    /// Move to next field (Tab). Includes Run button at the end.
+    /// Move to next field (Down/Tab).
     pub fn next_field(&mut self) {
         // Normalize current field before leaving
         if let Some(field) = self.active_field_mut() {
             field.normalize_value();
         }
         if !self.fields.is_empty() {
-            // Cycle through fields + 1 for Run button
-            let total = self.fields.len() + 1;
-            self.active_field_idx = (self.active_field_idx + 1) % total;
+            // Cycle through fields only
+            self.active_field_idx = (self.active_field_idx + 1) % self.fields.len();
             // Move cursor to end of new field
             if let Some(field) = self.active_field_mut() {
                 field.cursor_pos = field.value.len();
@@ -432,17 +424,16 @@ impl FormState {
         }
     }
 
-    /// Move to previous field (Shift+Tab). Includes Run button at the end.
+    /// Move to previous field (Up/Shift+Tab).
     pub fn prev_field(&mut self) {
         // Normalize current field before leaving
         if let Some(field) = self.active_field_mut() {
             field.normalize_value();
         }
         if !self.fields.is_empty() {
-            // Cycle through fields + 1 for Run button
-            let total = self.fields.len() + 1;
+            // Cycle through fields only
             if self.active_field_idx == 0 {
-                self.active_field_idx = total - 1; // Go to Run button
+                self.active_field_idx = self.fields.len() - 1;
             } else {
                 self.active_field_idx -= 1;
             }
