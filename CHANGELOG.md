@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2025-01-11
+
+### Added
+
+- **Multi-tab TUI support**: Run multiple tools concurrently in separate tabs
+  - Tab/Shift+Tab to cycle between tabs and menu
+  - Each tab maintains independent state (configure, running, completed)
+  - Process output captured per-tab with scrollable view
+  - Close tabs with Esc (confirmation dialog for running processes)
+  - "Don't ask again" option for close confirmation
+- **File browser for path fields**: Press Space on path fields to browse filesystem
+  - Navigate directories with arrow keys, Enter, Backspace
+  - Space to select current directory (for output paths)
+  - Supports both file and directory selection modes
+- **Tab rename with Ctrl+R**: Rename active tab with custom title
+  - Centered dialog with cursor support
+  - Full text editing (arrows, Home/End, Backspace, Delete)
+- **Cursor indicator in text fields**: Shows `|` at cursor position for visual feedback
+- **Tool categories in menu**: Tools grouped by category (Recording, Analysis, Post-Processing, Development)
+- **Ctrl+Enter to run**: Execute tool from anywhere in the form, not just Run button
+
+### Changed
+
+- **UI improvements**:
+  - Consistent spacing between all UI sections
+  - Standardized help text: `[Tab/Shift+Tab] Cycle Tabs` everywhere
+  - Field highlight extends to full terminal width for all field types
+  - Removed Run button (use Ctrl+Enter instead)
+- **Code cleanup**:
+  - Extracted shared UI helpers to `ui_helpers.rs`
+  - Simplified tool binaries and library code
+  - Removed unused dependencies (tokio, uuid, tempfile, hostname)
+  - Converted lsl-recorder to synchronous (no async runtime needed)
+
 ## [1.9.1] - 2025-01-09
 
 ### Fixed
