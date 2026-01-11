@@ -14,7 +14,6 @@ default-run = "lsl-toolbox"
 
 [dependencies]
 lsl = {git = "https://github.com/labstreaminglayer/liblsl-rust.git", rev = "afa1d251674591c11ebc06070de60914b6dafccf"}
-tokio = { version = "1.0", features = ["full"] }
 clap = { version = "4.0", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -22,14 +21,11 @@ quick-xml = "0.37"
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-uuid = { version = "1.0", features = ["v4"] }
-tempfile = "3.0"
 ndarray = "0.16"
 zarrs = { version = "0.22.7", features = ["filesystem", "blosc"] }
 fastrand = "2.0"
 fs2 = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
-hostname = "0.3"
 ratatui = "0.29"
 crossterm = "0.28"
 
