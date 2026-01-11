@@ -187,26 +187,24 @@ impl FormField {
 
     /// Cycle to next option (for Select fields).
     pub fn next_option(&mut self) {
-        if let FieldType::Select(ref options) = self.field_type {
-            if !options.is_empty() {
-                self.select_idx = (self.select_idx + 1) % options.len();
-                self.value = options[self.select_idx].clone();
-            }
-        }
+        let FieldType::Select(ref options) = self.field_type else { return };
+        if options.is_empty() { return; }
+
+        self.select_idx = (self.select_idx + 1) % options.len();
+        self.value = options[self.select_idx].clone();
     }
 
     /// Cycle to previous option (for Select fields).
     pub fn prev_option(&mut self) {
-        if let FieldType::Select(ref options) = self.field_type {
-            if !options.is_empty() {
-                if self.select_idx == 0 {
-                    self.select_idx = options.len() - 1;
-                } else {
-                    self.select_idx -= 1;
-                }
-                self.value = options[self.select_idx].clone();
-            }
-        }
+        let FieldType::Select(ref options) = self.field_type else { return };
+        if options.is_empty() { return; }
+
+        self.select_idx = if self.select_idx == 0 {
+            options.len() - 1
+        } else {
+            self.select_idx - 1
+        };
+        self.value = options[self.select_idx].clone();
     }
 
     /// Normalize the value based on field type.

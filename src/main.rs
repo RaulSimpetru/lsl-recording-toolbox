@@ -21,9 +21,9 @@ use crossterm::event::KeyCode;
 use tui::{
     app::TOOLS,
     events::{
-        is_backspace, is_ctrl_c, is_ctrl_enter, is_delete, is_down, is_end, is_enter, is_esc,
-        is_home, is_left, is_page_down, is_page_up, is_right, is_shift_tab, is_space, is_tab,
-        is_up, Event, EventHandler,
+        is_backspace, is_ctrl_c, is_ctrl_enter, is_ctrl_r, is_delete, is_down, is_end, is_enter,
+        is_esc, is_home, is_left, is_page_down, is_page_up, is_right, is_shift_tab, is_space,
+        is_tab, is_up, Event, EventHandler,
     },
     process::{ProcessEvent, ProcessManager},
     tab::TabMode,
@@ -133,15 +133,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                         app.close_file_browser();
 
                         // Set the path in the form field
-                        if let Some(idx) = field_idx {
-                            if let Some(tab) = app.active_tab_mut() {
-                                if let Some(ref mut form) = tab.form_state {
-                                    if let Some(field) = form.fields.get_mut(idx) {
-                                        field.value = path;
-                                        field.cursor_pos = field.value.len();
-                                    }
-                                }
-                            }
+                        if let Some(idx) = field_idx
+                            && let Some(tab) = app.active_tab_mut()
+                            && let Some(ref mut form) = tab.form_state
+                            && let Some(field) = form.fields.get_mut(idx)
+                        {
+                            field.value = path;
+                            field.cursor_pos = field.value.len();
                         }
                         needs_full_redraw = true;
                     }
@@ -160,6 +158,39 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                         app.confirm_close_dont_ask();
                         needs_full_redraw = true;
                     }
+                    continue;
+                }
+
+                // Handle rename dialog (high priority)
+                if app.is_renaming() {
+                    if is_enter(&key) {
+                        app.confirm_rename();
+                        needs_full_redraw = true;
+                    } else if is_esc(&key) {
+                        app.cancel_rename();
+                        needs_full_redraw = true;
+                    } else if is_left(&key) {
+                        app.rename_cursor_left();
+                    } else if is_right(&key) {
+                        app.rename_cursor_right();
+                    } else if is_home(&key) {
+                        app.rename_cursor_home();
+                    } else if is_end(&key) {
+                        app.rename_cursor_end();
+                    } else if is_backspace(&key) {
+                        app.rename_backspace();
+                    } else if is_delete(&key) {
+                        app.rename_delete();
+                    } else if let KeyCode::Char(c) = key.code {
+                        app.rename_insert(c);
+                    }
+                    continue;
+                }
+
+                // Ctrl+R to rename active tab
+                if is_ctrl_r(&key) && !app.is_in_menu() {
+                    app.start_rename();
+                    needs_full_redraw = true;
                     continue;
                 }
 
@@ -280,17 +311,17 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                                     }
                                 } else if is_space(&key) {
                                     // Space: open file browser for path fields, or toggle for bool/select
-                                    if let Some(ref mut form) = tab.form_state {
-                                        if let Some(field) = form.active_field() {
-                                            if field.is_path_field() {
-                                                let current_value = field.value.clone();
-                                                let select_dir = field.selects_directory();
-                                                let field_idx = form.active_field_idx;
-                                                app.open_file_browser(&current_value, select_dir, field_idx);
-                                                needs_full_redraw = true;
-                                            } else if !field.accepts_text_input() {
-                                                form.toggle_or_cycle();
-                                            }
+                                    if let Some(ref mut form) = tab.form_state
+                                        && let Some(field) = form.active_field()
+                                    {
+                                        if field.is_path_field() {
+                                            let current_value = field.value.clone();
+                                            let select_dir = field.selects_directory();
+                                            let field_idx = form.active_field_idx;
+                                            app.open_file_browser(&current_value, select_dir, field_idx);
+                                            needs_full_redraw = true;
+                                        } else if !field.accepts_text_input() {
+                                            form.toggle_or_cycle();
                                         }
                                     }
                                 } else if let KeyCode::Char(c) = key.code {
@@ -300,43 +331,15 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                                     }
                                 }
                             }
-                            TabMode::Running => {
-                                if is_esc(&key) || is_ctrl_c(&key) {
-                                    // Kill the process and close tab
-                                    app.request_close_active_tab();
-                                    mode_changed = true;
-                                } else if is_enter(&key) {
-                                    // Send input to the process
-                                    tab.send_input();
-                                } else if is_up(&key) {
-                                    tab.scroll_up(1);
-                                } else if is_down(&key) {
-                                    tab.scroll_down(1);
-                                } else if is_page_up(&key) {
-                                    let page_size = tab.cached_visible_height / 2;
-                                    tab.scroll_up(page_size);
-                                } else if is_page_down(&key) {
-                                    let page_size = tab.cached_visible_height / 2;
-                                    tab.scroll_down(page_size);
-                                } else if is_left(&key) {
-                                    tab.input_cursor_left();
-                                } else if is_right(&key) {
-                                    tab.input_cursor_right();
-                                } else if is_home(&key) {
-                                    tab.input_cursor_home();
-                                } else if is_end(&key) {
-                                    tab.input_cursor_end();
-                                } else if is_backspace(&key) {
-                                    tab.input_backspace();
-                                } else if is_delete(&key) {
-                                    tab.input_delete();
-                                } else if let KeyCode::Char(c) = key.code {
-                                    tab.input_insert(c);
-                                }
-                            }
-                            TabMode::Completed => {
-                                if is_esc(&key) || is_enter(&key) {
-                                    // Close the completed tab
+                            TabMode::Running | TabMode::Completed => {
+                                // Handle close/exit for both modes
+                                let should_close = match tab.mode {
+                                    TabMode::Running => is_esc(&key) || is_ctrl_c(&key),
+                                    TabMode::Completed => is_esc(&key) || is_enter(&key),
+                                    _ => false,
+                                };
+
+                                if should_close {
                                     app.request_close_active_tab();
                                     mode_changed = true;
                                 } else if is_up(&key) {
@@ -344,11 +347,28 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                                 } else if is_down(&key) {
                                     tab.scroll_down(1);
                                 } else if is_page_up(&key) {
-                                    let page_size = tab.cached_visible_height / 2;
-                                    tab.scroll_up(page_size);
+                                    tab.scroll_up(tab.cached_visible_height / 2);
                                 } else if is_page_down(&key) {
-                                    let page_size = tab.cached_visible_height / 2;
-                                    tab.scroll_down(page_size);
+                                    tab.scroll_down(tab.cached_visible_height / 2);
+                                } else if tab.mode == TabMode::Running {
+                                    // Input handling only for Running mode
+                                    if is_enter(&key) {
+                                        tab.send_input();
+                                    } else if is_left(&key) {
+                                        tab.input_cursor_left();
+                                    } else if is_right(&key) {
+                                        tab.input_cursor_right();
+                                    } else if is_home(&key) {
+                                        tab.input_cursor_home();
+                                    } else if is_end(&key) {
+                                        tab.input_cursor_end();
+                                    } else if is_backspace(&key) {
+                                        tab.input_backspace();
+                                    } else if is_delete(&key) {
+                                        tab.input_delete();
+                                    } else if let KeyCode::Char(c) = key.code {
+                                        tab.input_insert(c);
+                                    }
                                 }
                             }
                         }
@@ -398,11 +418,11 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                     }
 
                     // Check for process exit
-                    if let Some(ref mut pm) = tab.process_manager {
-                        if let Some(exit_code) = pm.check_exit() {
-                            tab.complete(exit_code);
-                            any_completed = true;
-                        }
+                    if let Some(ref mut pm) = tab.process_manager
+                        && let Some(exit_code) = pm.check_exit()
+                    {
+                        tab.complete(exit_code);
+                        any_completed = true;
                     }
                 }
                 if any_completed {

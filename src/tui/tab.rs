@@ -205,18 +205,13 @@ impl TabState {
     }
 
     /// Send input to the process and clear buffer.
-    pub fn send_input(&mut self) -> Option<String> {
-        if let Some(ref mut pm) = self.process_manager {
-            let input = self.input_buffer.clone();
-            if pm.write_line(&input).is_ok() {
-                // Echo input to output
-                self.output_lines.push(format!("> {}", input));
-                self.input_buffer.clear();
-                self.input_cursor = 0;
-                return Some(input);
-            }
+    pub fn send_input(&mut self) {
+        let Some(ref mut pm) = self.process_manager else { return };
+        if pm.write_line(&self.input_buffer).is_ok() {
+            self.output_lines.push(format!("> {}", self.input_buffer));
+            self.input_buffer.clear();
+            self.input_cursor = 0;
         }
-        None
     }
 }
 

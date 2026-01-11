@@ -140,3 +140,8 @@ pub fn is_end(key: &KeyEvent) -> bool {
 pub fn is_space(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char(' ')
 }
+
+/// Check if a key event is Ctrl+R (rename).
+pub fn is_ctrl_r(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL)
+}

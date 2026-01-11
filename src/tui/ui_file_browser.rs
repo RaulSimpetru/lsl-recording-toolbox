@@ -15,8 +15,8 @@ pub fn render_file_browser(frame: &mut Frame, browser: &FileBrowserState) {
     let area = frame.area();
 
     // Calculate dialog size (80% of screen, max 80 cols)
-    let dialog_width = (area.width * 80 / 100).min(80).max(40);
-    let dialog_height = (area.height * 80 / 100).min(30).max(10);
+    let dialog_width = (area.width * 80 / 100).clamp(40, 80);
+    let dialog_height = (area.height * 80 / 100).clamp(10, 30);
     let x = (area.width.saturating_sub(dialog_width)) / 2;
     let y = (area.height.saturating_sub(dialog_height)) / 2;
 
@@ -131,38 +131,25 @@ pub fn render_file_browser(frame: &mut Frame, browser: &FileBrowserState) {
         frame.render_widget(list, chunks[1]);
     }
 
-    // Help bar
-    let help_spans = if browser.select_dir {
+    // Help bar - use helper function for consistent formatting
+    fn help_span(key: &str, action: &str) -> Vec<Span<'static>> {
         vec![
-            Span::styled(" [", Style::default().fg(Color::DarkGray)),
-            Span::styled("Up/Dn", Style::default().fg(Color::Cyan)),
-            Span::styled("] Navigate  ", Style::default().fg(Color::DarkGray)),
             Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Enter", Style::default().fg(Color::Cyan)),
-            Span::styled("] Open Dir  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Space", Style::default().fg(Color::Cyan)),
-            Span::styled("] Select This Dir  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::Cyan)),
-            Span::styled("] Cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled(key.to_string(), Style::default().fg(Color::Cyan)),
+            Span::styled(format!("] {} ", action), Style::default().fg(Color::DarkGray)),
         ]
+    }
+
+    let mut help_spans = vec![Span::styled(" ", Style::default())];
+    help_spans.extend(help_span("Up/Dn", "Navigate"));
+    if browser.select_dir {
+        help_spans.extend(help_span("Enter", "Open Dir"));
+        help_spans.extend(help_span("Space", "Select This Dir"));
     } else {
-        vec![
-            Span::styled(" [", Style::default().fg(Color::DarkGray)),
-            Span::styled("Up/Dn", Style::default().fg(Color::Cyan)),
-            Span::styled("] Navigate  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Enter", Style::default().fg(Color::Cyan)),
-            Span::styled("] Select/Open  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Backspace", Style::default().fg(Color::Cyan)),
-            Span::styled("] Go Up  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::Cyan)),
-            Span::styled("] Cancel", Style::default().fg(Color::DarkGray)),
-        ]
-    };
+        help_spans.extend(help_span("Enter", "Select/Open"));
+        help_spans.extend(help_span("Backspace", "Go Up"));
+    }
+    help_spans.extend(help_span("Esc", "Cancel"));
 
     let help = Paragraph::new(Line::from(help_spans))
         .style(Style::default().bg(Color::Black))

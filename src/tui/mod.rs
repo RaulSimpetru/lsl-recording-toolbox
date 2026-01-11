@@ -15,6 +15,7 @@ pub mod ui;
 pub mod ui_dialog;
 pub mod ui_file_browser;
 pub mod ui_form;
+pub mod ui_helpers;
 pub mod ui_tabs;
 
 pub use app::App;

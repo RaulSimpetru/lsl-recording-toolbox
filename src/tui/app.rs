@@ -97,6 +97,16 @@ pub struct CloseConfirmation {
     pub tab_index: usize,
 }
 
+/// State for tab rename dialog.
+pub struct RenameState {
+    /// Index of tab being renamed
+    pub tab_index: usize,
+    /// Current input buffer
+    pub buffer: String,
+    /// Cursor position in buffer
+    pub cursor: usize,
+}
+
 /// Main application state with multi-tab support.
 pub struct App {
     /// Currently selected tool index in the menu
@@ -109,6 +119,8 @@ pub struct App {
     pub close_confirmation: Option<CloseConfirmation>,
     /// File browser state (when browsing for a path)
     pub file_browser: Option<FileBrowserState>,
+    /// Rename dialog state
+    pub rename_state: Option<RenameState>,
     /// User preference: don't ask before closing tabs with running processes
     pub skip_close_confirmation: bool,
     /// Whether the application should quit
@@ -126,6 +138,7 @@ impl App {
             active_tab_index: None,
             close_confirmation: None,
             file_browser: None,
+            rename_state: None,
             skip_close_confirmation: false,
             should_quit: false,
             next_tab_id: 0,
@@ -150,6 +163,97 @@ impl App {
     /// Get the file browser mutably.
     pub fn file_browser_mut(&mut self) -> Option<&mut FileBrowserState> {
         self.file_browser.as_mut()
+    }
+
+    /// Check if rename dialog is open.
+    pub fn is_renaming(&self) -> bool {
+        self.rename_state.is_some()
+    }
+
+    /// Start renaming the active tab.
+    pub fn start_rename(&mut self) {
+        if let Some(tab_index) = self.active_tab_index {
+            let current_title = self.tabs[tab_index].title.clone();
+            self.rename_state = Some(RenameState {
+                tab_index,
+                buffer: current_title.clone(),
+                cursor: current_title.len(),
+            });
+        }
+    }
+
+    /// Cancel rename and close dialog.
+    pub fn cancel_rename(&mut self) {
+        self.rename_state = None;
+    }
+
+    /// Confirm rename and apply new title.
+    pub fn confirm_rename(&mut self) {
+        if let Some(state) = self.rename_state.take() {
+            let new_title = state.buffer.trim();
+            if !new_title.is_empty() {
+                self.tabs[state.tab_index].title = new_title.to_string();
+            }
+        }
+    }
+
+    /// Insert character in rename buffer.
+    pub fn rename_insert(&mut self, c: char) {
+        if let Some(ref mut state) = self.rename_state {
+            if state.buffer.len() < 64 {
+                state.buffer.insert(state.cursor, c);
+                state.cursor += 1;
+            }
+        }
+    }
+
+    /// Backspace in rename buffer.
+    pub fn rename_backspace(&mut self) {
+        if let Some(ref mut state) = self.rename_state {
+            if state.cursor > 0 {
+                state.cursor -= 1;
+                state.buffer.remove(state.cursor);
+            }
+        }
+    }
+
+    /// Delete in rename buffer.
+    pub fn rename_delete(&mut self) {
+        if let Some(ref mut state) = self.rename_state {
+            if state.cursor < state.buffer.len() {
+                state.buffer.remove(state.cursor);
+            }
+        }
+    }
+
+    /// Move rename cursor left.
+    pub fn rename_cursor_left(&mut self) {
+        if let Some(ref mut state) = self.rename_state {
+            state.cursor = state.cursor.saturating_sub(1);
+        }
+    }
+
+    /// Move rename cursor right.
+    pub fn rename_cursor_right(&mut self) {
+        if let Some(ref mut state) = self.rename_state {
+            if state.cursor < state.buffer.len() {
+                state.cursor += 1;
+            }
+        }
+    }
+
+    /// Move rename cursor to start.
+    pub fn rename_cursor_home(&mut self) {
+        if let Some(ref mut state) = self.rename_state {
+            state.cursor = 0;
+        }
+    }
+
+    /// Move rename cursor to end.
+    pub fn rename_cursor_end(&mut self) {
+        if let Some(ref mut state) = self.rename_state {
+            state.cursor = state.buffer.len();
+        }
     }
 
     /// Get the currently selected tool in the menu.
@@ -236,14 +340,13 @@ impl App {
 
     /// Request to close the active tab (may trigger confirmation dialog).
     pub fn request_close_active_tab(&mut self) {
-        if let Some(idx) = self.active_tab_index {
-            if let Some(tab) = self.tabs.get(idx) {
-                if tab.is_running() && !self.skip_close_confirmation {
-                    self.close_confirmation = Some(CloseConfirmation { tab_index: idx });
-                } else {
-                    self.close_tab(idx);
-                }
-            }
+        let Some(idx) = self.active_tab_index else { return };
+        let Some(tab) = self.tabs.get(idx) else { return };
+
+        if tab.is_running() && !self.skip_close_confirmation {
+            self.close_confirmation = Some(CloseConfirmation { tab_index: idx });
+        } else {
+            self.close_tab(idx);
         }
     }
 
@@ -304,12 +407,12 @@ impl Default for App {
 /// Checks next to current executable, target/release/, target/debug/, and PATH.
 pub fn find_binary(binary_name: &str) -> PathBuf {
     // Get the directory of the current executable
-    if let Ok(exe_path) = env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let sibling = exe_dir.join(binary_name);
-            if sibling.exists() {
-                return sibling;
-            }
+    if let Ok(exe_path) = env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        let sibling = exe_dir.join(binary_name);
+        if sibling.exists() {
+            return sibling;
         }
     }
 
