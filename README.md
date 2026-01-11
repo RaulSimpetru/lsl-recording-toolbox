@@ -69,10 +69,12 @@ cargo run --release
 ```
 
 The TUI provides:
-- Arrow key navigation to select tools
+- Tool categories (Recording, Analysis, Post-Processing, Development)
+- Multi-tab support for running concurrent tools
 - Form-based configuration with typed fields
+- File browser for path fields (Space to browse)
 - Live command preview
-- Process output display
+- Process output display with scrolling
 
 ### Single Stream Recording
 
@@ -127,15 +129,17 @@ Interactive terminal UI for selecting and configuring all tools in the toolbox.
 
 **Features:**
 
-- Menu-based tool selection with arrow key navigation
+- Tool categories: Recording, Analysis, Post-Processing, Development
+- Multi-tab support for running multiple tools concurrently
 - Form-based configuration with typed fields:
-  - Text fields for strings and paths
+  - Text fields for strings with cursor indicator
+  - Path fields with file browser (Space to browse)
   - Integer/float fields with validation
   - Boolean toggle fields (ON/OFF)
   - Dropdown select fields
 - Live command preview showing exact command being built
-- Integrated process output display
-- Esc key navigation throughout
+- Tab rename with Ctrl+R
+- Process output per-tab with scrollable view
 
 **Usage:**
 
@@ -150,10 +154,12 @@ lsl-toolbox
 **Controls:**
 
 - `↑↓` - Navigate menu/fields
-- `Tab` - Next field
-- `Space/Enter` - Toggle bool/select, activate Run button
-- `←→` - Cycle select options
-- `Esc` - Back/Cancel/Quit
+- `Tab/Shift+Tab` - Cycle tabs and menu
+- `Ctrl+Enter` - Run tool
+- `Ctrl+R` - Rename active tab
+- `Space` - Toggle bool/select, open file browser for paths
+- `←→` - Cycle select options, move cursor
+- `Esc` - Close tab/Cancel/Quit
 
 ### lsl-recorder
 
@@ -421,13 +427,19 @@ lsl-recording-toolbox/
 │   ├── main.rs              # TUI launcher (lsl-toolbox)
 │   ├── tui/                 # TUI components
 │   │   ├── mod.rs           # Module exports
-│   │   ├── app.rs           # Application state
+│   │   ├── app.rs           # Application state (multi-tab)
+│   │   ├── tab.rs           # Tab state management
 │   │   ├── ui.rs            # Menu/output rendering
+│   │   ├── ui_tabs.rs       # Tab bar rendering
 │   │   ├── ui_form.rs       # Form rendering
+│   │   ├── ui_dialog.rs     # Dialog rendering (rename, confirm)
+│   │   ├── ui_file_browser.rs # File browser rendering
+│   │   ├── ui_helpers.rs    # Shared UI utilities
 │   │   ├── form.rs          # Form field types
+│   │   ├── file_browser.rs  # File browser state
 │   │   ├── tool_config.rs   # Tool configurations
 │   │   ├── events.rs        # Keyboard event handling
-│   │   └── process.rs       # Process management
+│   │   └── process.rs       # Process spawning and I/O
 │   ├── lib.rs               # Shared library code
 │   ├── cli.rs               # CLI argument definitions
 │   ├── commands.rs          # Interactive command handler
