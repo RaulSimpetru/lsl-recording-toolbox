@@ -68,8 +68,7 @@ use lsl_recording_toolbox::cli::Args;
 use lsl_recording_toolbox::commands::handle_commands;
 use lsl_recording_toolbox::lsl::{record_lsl_stream, RecordingConfig, RecordingParams, StreamResolutionConfig, ZarrConfig};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
 
     if !args.quiet {
