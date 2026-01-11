@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::cli::Args;
-use crate::zarr::writer::ZarrWriter;
+use crate::zarr::writer::{ZarrWriter, ZarrWriterConfig};
 use crate::zarr::{open_or_create_zarr_store, setup_stream_arrays};
 
 /// Resolve LSL stream with retry logic and random delays to avoid race conditions
@@ -175,7 +175,7 @@ pub fn record_lsl_stream(params: RecordingParams) -> Result<()> {
                             if ts != 0.0 {
                                 *buf = sample_data; // Update the buffer with the pulled data
                                 if let Some(ref mut writer) = zarr_writer {
-                                    writer.add_sample_slice_string(&buf, ts);
+                                    writer.add_sample_slice_string(buf, ts);
                                 }
                             }
                             ts
@@ -408,7 +408,7 @@ impl MemoryMonitor {
                 );
                 *last_report = Instant::now();
             }
-        } else if !quiet && sample_count % 100 == 0 {
+        } else if !quiet && sample_count.is_multiple_of(100) {
             println!("Recorded {} samples", sample_count);
         }
     }
@@ -479,14 +479,14 @@ fn initialize_zarr_writer(
         adaptive_size
     };
 
-    Ok(Some(ZarrWriter::new(
+    Ok(Some(ZarrWriter::new(ZarrWriterConfig {
         data_array,
         time_array,
         buffer_size,
         channel_format,
-        recording_config.flush_interval,
-        config.store_path.clone(),
+        flush_interval: recording_config.flush_interval,
+        store_path: config.store_path.clone(),
         store,
-        config.stream_name.clone(),
-    )?))
+        stream_name: config.stream_name.clone(),
+    })?))
 }

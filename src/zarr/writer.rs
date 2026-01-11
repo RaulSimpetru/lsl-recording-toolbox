@@ -7,6 +7,18 @@ use std::time::{Duration, Instant};
 use zarrs::array::Array;
 use zarrs::filesystem::FilesystemStore;
 
+/// Configuration for creating a ZarrWriter
+pub struct ZarrWriterConfig {
+    pub data_array: Array<FilesystemStore>,
+    pub time_array: Array<FilesystemStore>,
+    pub buffer_size: usize,
+    pub channel_format: lsl::ChannelFormat,
+    pub flush_interval: Duration,
+    pub store_path: PathBuf,
+    pub store: std::sync::Arc<FilesystemStore>,
+    pub stream_name: String,
+}
+
 /// Enum to handle different LSL data types
 #[derive(Debug, Clone)]
 pub enum SampleData {
@@ -68,22 +80,13 @@ pub struct ZarrWriter {
 }
 
 impl ZarrWriter {
-    pub fn new(
-        data_array: Array<FilesystemStore>,
-        time_array: Array<FilesystemStore>,
-        buffer_size: usize,
-        channel_format: lsl::ChannelFormat,
-        flush_interval: Duration,
-        store_path: PathBuf,
-        store: std::sync::Arc<FilesystemStore>,
-        stream_name: String,
-    ) -> Result<Self> {
+    pub fn new(config: ZarrWriterConfig) -> Result<Self> {
         // Set max buffer size to 10x normal buffer size to prevent memory bloat
-        let max_buffer_size = (buffer_size * 10).max(1000);
-        let current_length = data_array.shape()[1] as usize; // Second dimension is samples
+        let max_buffer_size = (config.buffer_size * 10).max(1000);
+        let current_length = config.data_array.shape()[1] as usize; // Second dimension is samples
 
         // Create metadata lock file for coordinating concurrent writes
-        let lock_path = store_path.join(".zarr_metadata.lock");
+        let lock_path = config.store_path.join(".zarr_metadata.lock");
         let metadata_lock = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -91,22 +94,22 @@ impl ZarrWriter {
             .open(lock_path)?;
 
         Ok(Self {
-            data_array,
-            time_array,
+            data_array: config.data_array,
+            time_array: config.time_array,
             sample_buffer: Vec::new(),
             time_buffer: Vec::new(),
-            buffer_size,
+            buffer_size: config.buffer_size,
             max_buffer_size,
             current_length,
-            channel_format,
+            channel_format: config.channel_format,
             last_flush_time: Instant::now(),
-            flush_interval,
+            flush_interval: config.flush_interval,
             temp_data_buffer: Vec::new(),
             slow_flush_warnings: 0,
             last_flush_duration: Duration::from_millis(0),
             metadata_lock,
-            store,
-            stream_name,
+            store: config.store,
+            stream_name: config.stream_name,
         })
     }
 

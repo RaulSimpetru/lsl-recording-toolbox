@@ -285,7 +285,7 @@ fn main() -> Result<()> {
             _ => unreachable!("Only Float32 and Int16 are supported"),
         }
 
-        if args.verbose && sample_count % 100 == 0 {
+        if args.verbose && sample_count.is_multiple_of(100) {
             let elapsed = start_time.elapsed().as_secs_f64();
             let samples_sent = (sample_count + 1) * args.chunk_size as u64;
             let expected_samples = (elapsed * args.sample_rate) as u64;

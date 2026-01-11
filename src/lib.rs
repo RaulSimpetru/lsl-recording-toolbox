@@ -143,17 +143,16 @@ use chrono::Datelike;
 
 /// Display GPL license notice for a program
 pub fn display_license_notice(program_name: &str) {
-	let version = env!("CARGO_PKG_VERSION");
-	let current_year = chrono::Utc::now().year();
-	let copyright_year = if current_year == 2025 {
-		"2025".to_string()
-	} else {
-		format!("2025-{}", current_year)
-	};
+    let version = env!("CARGO_PKG_VERSION");
+    let current_year = chrono::Utc::now().year();
+    let copyright_year = match current_year {
+        2025 => "2025".to_string(),
+        year => format!("2025-{}", year),
+    };
 
-	println!("{} {} Copyright (C) {} Raul C. Sîmpetru", program_name, version, copyright_year);
-	println!("This program comes with ABSOLUTELY NO WARRANTY.");
-	println!("For details see https://www.gnu.org/licenses/gpl-3.0.html#license-text.");
-	println!("This is free software, and you are welcome to redistribute it under certain conditions.");
-	println!();
+    println!("{} {} Copyright (C) {} Raul C. Sîmpetru", program_name, version, copyright_year);
+    println!("This program comes with ABSOLUTELY NO WARRANTY.");
+    println!("For details see https://www.gnu.org/licenses/gpl-3.0.html#license-text.");
+    println!("This is free software, and you are welcome to redistribute it under certain conditions.");
+    println!();
 }

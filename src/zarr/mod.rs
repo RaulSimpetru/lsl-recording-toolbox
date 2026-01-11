@@ -40,36 +40,30 @@ pub fn open_or_create_zarr_store(
     lock_file.lock_exclusive()?;
 
     // Initialize base structure if needed (protected by lock)
+    let mut last_error = None;
     for attempt in 0..2 {
         match initialize_store_structure(&store) {
             Ok(_) => {
-                // Release lock before returning
                 lock_file.unlock()?;
                 return Ok(store);
             }
             Err(e) => {
-                if attempt < 1 {
-                    eprintln!(
-                        "Warning: Failed to initialize Zarr store (attempt {}): {}",
-                        attempt + 1,
-                        e
-                    );
-                    std::thread::sleep(Duration::from_millis(10 + fastrand::u64(0..20)));
-                } else {
-                    // Release lock before returning error
-                    lock_file.unlock()?;
-                    return Err(anyhow::anyhow!(
-                        "Failed to initialize Zarr store after 2 attempts: {}",
-                        e
-                    ));
-                }
+                eprintln!(
+                    "Warning: Failed to initialize Zarr store (attempt {}): {}",
+                    attempt + 1,
+                    e
+                );
+                last_error = Some(e);
+                std::thread::sleep(Duration::from_millis(10 + fastrand::u64(0..20)));
             }
         }
     }
 
-    // Release lock before returning (shouldn't reach here, but for safety)
     lock_file.unlock()?;
-    Ok(store)
+    Err(anyhow::anyhow!(
+        "Failed to initialize Zarr store after 2 attempts: {}",
+        last_error.unwrap()
+    ))
 }
 
 /// Initialize Zarr store with base group structure
@@ -107,18 +101,10 @@ fn group_exists(store: &Arc<FilesystemStore>, path: &str) -> Result<bool> {
 
 /// Create a Zarr group if it doesn't exist
 fn create_group_if_not_exists(store: &Arc<FilesystemStore>, path: &str) -> Result<()> {
-    let exists = group_exists(store, path)?;
-    eprintln!("DEBUG: group_exists('{}') = {}", path, exists);
-
-    if !exists {
-        eprintln!("DEBUG: Creating group at '{}'", path);
-        // Create the group with GroupBuilder
+    if !group_exists(store, path)? {
         let group = GroupBuilder::new().build(store.clone(), path)?;
-        // Store metadata to persist the group
         group.store_metadata()?;
-        eprintln!("DEBUG: Group created and metadata stored for '{}'", path);
     }
-
     Ok(())
 }
 
@@ -416,6 +402,26 @@ pub fn setup_stream_arrays(
     };
 
     Ok((data_array, time_array))
+}
+
+/// Read attributes from a group's zarr.json file (Zarr v3 format)
+pub fn read_group_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<serde_json::Value> {
+    let trimmed_path = path.trim_end_matches('/').trim_start_matches('/');
+    let zarr_json_path = if trimmed_path.is_empty() {
+        "zarr.json".to_string()
+    } else {
+        format!("{}/zarr.json", trimmed_path)
+    };
+    let zarr_key = StoreKey::new(&zarr_json_path)?;
+    let zarr_bytes = store
+        .get(&zarr_key)?
+        .ok_or_else(|| anyhow::anyhow!("Metadata not found at {}", zarr_json_path))?;
+    let zarr_metadata: serde_json::Value = serde_json::from_slice(&zarr_bytes)?;
+
+    Ok(zarr_metadata
+        .get("attributes")
+        .cloned()
+        .unwrap_or_else(|| json!({})))
 }
 
 /// Check if a Zarr array exists (Zarr v3 uses zarr.json with node_type)

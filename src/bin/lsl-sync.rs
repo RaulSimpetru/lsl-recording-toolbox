@@ -337,11 +337,8 @@ fn main() -> Result<()> {
 }
 
 fn read_streams(store: &Arc<FilesystemStore>, zarr_path: &Path) -> Result<Vec<StreamData>> {
-    let streams = Vec::new();
-
-    // Read streams from zarr root directory
     if !zarr_path.exists() {
-        return Ok(streams);
+        return Ok(Vec::new());
     }
 
     let mut streams = Vec::new();
