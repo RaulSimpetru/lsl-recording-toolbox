@@ -59,43 +59,32 @@ impl ProcessManager {
 
         let (tx, rx) = mpsc::channel();
 
-        // Spawn thread to read stdout
-        let stdout_tx = tx.clone();
-        thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                match line {
-                    Ok(line) => {
-                        if stdout_tx.send(ProcessEvent::Output(line)).is_err() {
+        // Helper to spawn a reader thread for stdout or stderr
+        fn spawn_reader_thread<R: std::io::Read + Send + 'static>(
+            reader: R,
+            tx: mpsc::Sender<ProcessEvent>,
+            stream_name: &'static str,
+        ) {
+            thread::spawn(move || {
+                let reader = BufReader::new(reader);
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => {
+                            if tx.send(ProcessEvent::Output(line)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(ProcessEvent::Error(format!("{} error: {}", stream_name, e)));
                             break;
                         }
                     }
-                    Err(e) => {
-                        let _ = stdout_tx.send(ProcessEvent::Error(format!("stdout error: {}", e)));
-                        break;
-                    }
                 }
-            }
-        });
+            });
+        }
 
-        // Spawn thread to read stderr
-        let stderr_tx = tx;
-        thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                match line {
-                    Ok(line) => {
-                        if stderr_tx.send(ProcessEvent::Output(line)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = stderr_tx.send(ProcessEvent::Error(format!("stderr error: {}", e)));
-                        break;
-                    }
-                }
-            }
-        });
+        spawn_reader_thread(stdout, tx.clone(), "stdout");
+        spawn_reader_thread(stderr, tx, "stderr");
 
         Ok(Self {
             child: Some(child),

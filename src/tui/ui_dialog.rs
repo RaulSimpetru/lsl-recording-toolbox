@@ -87,3 +87,73 @@ pub fn render_close_confirmation(frame: &mut Frame, app: &App) {
 
     frame.render_widget(dialog, dialog_area);
 }
+
+/// Render the rename tab dialog as a centered modal.
+pub fn render_rename_dialog(frame: &mut Frame, app: &App) {
+    let Some(ref state) = app.rename_state else {
+        return;
+    };
+
+    let area = frame.area();
+
+    // Calculate centered dialog position
+    let dialog_width = 50u16;
+    let dialog_height = 5u16;
+    let x = area.width.saturating_sub(dialog_width) / 2;
+    let y = area.height.saturating_sub(dialog_height) / 2;
+
+    let dialog_area = Rect {
+        x,
+        y,
+        width: dialog_width.min(area.width),
+        height: dialog_height.min(area.height),
+    };
+
+    // Clear the dialog area
+    frame.render_widget(Clear, dialog_area);
+
+    // Build input display with cursor
+    let buffer = &state.buffer;
+    let cursor_pos = state.cursor;
+    let display_with_cursor = format!(
+        "{}|{}",
+        &buffer[..cursor_pos],
+        &buffer[cursor_pos..]
+    );
+
+    // Build dialog content
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" [", Style::default().fg(Color::DarkGray)),
+            Span::styled(display_with_cursor, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("]", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" [", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::Green)),
+            Span::styled("] Confirm  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::Red)),
+            Span::styled("] Cancel", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
+
+    let dialog = Paragraph::new(lines)
+        .style(Style::default().bg(Color::Black))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Rename Tab ")
+                .title_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .border_style(Style::default().fg(Color::Cyan))
+                .style(Style::default().bg(Color::Black)),
+        );
+
+    frame.render_widget(dialog, dialog_area);
+}

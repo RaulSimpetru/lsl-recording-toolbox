@@ -166,20 +166,6 @@ impl FileBrowserState {
         }
     }
 
-    /// Update scroll offset based on visible height.
-    pub fn update_scroll(&mut self, visible_height: usize) {
-        if visible_height == 0 {
-            return;
-        }
-
-        // Ensure selected item is visible
-        if self.selected_index < self.scroll_offset {
-            self.scroll_offset = self.selected_index;
-        } else if self.selected_index >= self.scroll_offset + visible_height {
-            self.scroll_offset = self.selected_index - visible_height + 1;
-        }
-    }
-
     /// Navigate into the selected directory or go up.
     pub fn enter_selected(&mut self) -> Option<PathBuf> {
         if let Some(entry) = self.selected_entry() {
@@ -207,19 +193,6 @@ impl FileBrowserState {
         if let Some(parent) = self.current_dir.parent() {
             self.current_dir = parent.to_path_buf();
             self.refresh();
-        }
-    }
-
-    /// Get the path to display/return.
-    pub fn get_selected_path(&self) -> Option<String> {
-        if self.select_dir {
-            // For directory selection, return current directory
-            Some(self.current_dir.to_string_lossy().to_string())
-        } else {
-            // For file selection, return selected file
-            self.selected_entry()
-                .filter(|e| !e.is_dir)
-                .map(|e| e.path.to_string_lossy().to_string())
         }
     }
 }
