@@ -70,6 +70,11 @@ pub fn is_enter(key: &KeyEvent) -> bool {
     key.code == KeyCode::Enter
 }
 
+/// Check if a key event is Ctrl+Enter.
+pub fn is_ctrl_enter(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
 /// Check if a key event is the up arrow.
 pub fn is_up(key: &KeyEvent) -> bool {
     key.code == KeyCode::Up
