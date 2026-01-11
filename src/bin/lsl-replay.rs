@@ -44,7 +44,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use lsl::{ChannelFormat, Pushable, StreamInfo, StreamOutlet};
-use serde_json::Value;
+use lsl_recording_toolbox::zarr::read_group_attributes;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
@@ -52,7 +52,6 @@ use std::time::{Duration, Instant};
 use zarrs::array::Array;
 use zarrs::array_subset::ArraySubset;
 use zarrs::filesystem::FilesystemStore;
-use zarrs::storage::{ReadableStorageTraits, StoreKey};
 
 #[derive(Parser)]
 #[command(name = "lsl-replay")]
@@ -336,7 +335,7 @@ fn replay_string(
     let data_array_path = format!("{}/data", stream_path);
 
     // Try "events" first, fall back to "data"
-    let (array_path, is_events) = if let Ok(_) = Array::<FilesystemStore>::open(store.clone(), &events_array_path) {
+    let (array_path, is_events) = if Array::<FilesystemStore>::open(store.clone(), &events_array_path).is_ok() {
         (events_array_path, true)
     } else {
         (data_array_path, false)
@@ -495,27 +494,5 @@ fn parse_channel_format(format_str: &str) -> Result<ChannelFormat> {
         "Int8" => Ok(ChannelFormat::Int8),
         "String" => Ok(ChannelFormat::String),
         _ => anyhow::bail!("Unknown channel format: {}", format_str),
-    }
-}
-
-/// Read attributes from a group's zarr.json file (Zarr v3 format)
-fn read_group_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<Value> {
-    let trimmed_path = path.trim_end_matches('/').trim_start_matches('/');
-    let zarr_json_path = if trimmed_path.is_empty() {
-        "zarr.json".to_string()
-    } else {
-        format!("{}/zarr.json", trimmed_path)
-    };
-    let zarr_key = StoreKey::new(&zarr_json_path)?;
-    let zarr_bytes = store
-        .get(&zarr_key)?
-        .ok_or_else(|| anyhow::anyhow!("Metadata not found at {}", zarr_json_path))?;
-    let zarr_metadata: Value = serde_json::from_slice(&zarr_bytes)?;
-
-    // Extract attributes from zarr.json structure
-    if let Some(attrs) = zarr_metadata.get("attributes") {
-        Ok(attrs.clone())
-    } else {
-        Ok(serde_json::json!({}))
     }
 }

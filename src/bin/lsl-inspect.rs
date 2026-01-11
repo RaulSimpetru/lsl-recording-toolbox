@@ -45,13 +45,12 @@
 
 use anyhow::Result;
 use clap::Parser;
-use serde_json::{json, Value};
+use lsl_recording_toolbox::zarr::read_group_attributes;
 use std::path::PathBuf;
 use std::sync::Arc;
 use zarrs::array::Array;
 use zarrs::array_subset::ArraySubset;
 use zarrs::filesystem::FilesystemStore;
-use zarrs::storage::{ReadableStorageTraits, StoreKey};
 
 #[derive(Parser)]
 #[command(name = "lsl-inspect")]
@@ -112,10 +111,10 @@ fn main() -> Result<()> {
                 let stream_name = entry.file_name().to_string_lossy().to_string();
 
                 // Filter by stream name if specified
-                if let Some(ref filter_streams) = args.stream {
-                    if !filter_streams.contains(&stream_name) {
-                        continue;
-                    }
+                if let Some(ref filter_streams) = args.stream
+                    && !filter_streams.contains(&stream_name)
+                {
+                    continue;
                 }
 
                 stream_idx += 1;
@@ -217,10 +216,10 @@ fn main() -> Result<()> {
                                 }
 
                                 // Show additional fields in verbose mode
-                                if args.verbose {
-                                    if let Some(recorded_at) = parsed.get("recorded_at") {
-                                        println!("{}   Recorded at: {}", indent, recorded_at.as_str().unwrap_or(""));
-                                    }
+                                if args.verbose
+                                    && let Some(recorded_at) = parsed.get("recorded_at")
+                                {
+                                    println!("{}   Recorded at: {}", indent, recorded_at.as_str().unwrap_or(""));
                                 }
                             }
                         }
@@ -239,26 +238,4 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Read attributes from a group's zarr.json file (Zarr v3 format)
-fn read_group_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<Value> {
-    let trimmed_path = path.trim_end_matches('/').trim_start_matches('/');
-    let zarr_json_path = if trimmed_path.is_empty() {
-        "zarr.json".to_string()
-    } else {
-        format!("{}/zarr.json", trimmed_path)
-    };
-    let zarr_key = StoreKey::new(&zarr_json_path)?;
-    let zarr_bytes = store
-        .get(&zarr_key)?
-        .ok_or_else(|| anyhow::anyhow!("Metadata not found at {}", zarr_json_path))?;
-    let zarr_metadata: Value = serde_json::from_slice(&zarr_bytes)?;
-
-    // Extract attributes from zarr.json structure
-    if let Some(attrs) = zarr_metadata.get("attributes") {
-        Ok(attrs.clone())
-    } else {
-        Ok(json!({}))
-    }
 }

@@ -306,14 +306,14 @@ fn main() -> Result<()> {
     }
 
     // Validate stream names if provided
-    if let Some(ref names) = args.stream_names {
-        if names.len() != args.source_ids.len() {
-            anyhow::bail!(
-                "Number of stream names ({}) must match number of source IDs ({})",
-                names.len(),
-                args.source_ids.len()
-            );
-        }
+    if let Some(ref names) = args.stream_names
+        && names.len() != args.source_ids.len()
+    {
+        anyhow::bail!(
+            "Number of stream names ({}) must match number of source IDs ({})",
+            names.len(),
+            args.source_ids.len()
+        );
     }
 
     log_with_time(
@@ -416,11 +416,9 @@ fn main() -> Result<()> {
     let (cmd_sender, cmd_receiver) = mpsc::channel();
     thread::spawn(move || {
         let stdin = std::io::stdin();
-        for line_res in stdin.lock().lines() {
-            if let Ok(line) = line_res {
-                if cmd_sender.send(line).is_err() {
-                    break; // Main thread closed
-                }
+        for line in stdin.lock().lines().map_while(Result::ok) {
+            if cmd_sender.send(line).is_err() {
+                break; // Main thread closed
             }
         }
     });

@@ -42,13 +42,13 @@
 //! - Alignment accuracy
 
 use anyhow::Result;
+use lsl_recording_toolbox::zarr::read_group_attributes;
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
 use zarrs::array::Array;
 use zarrs::array_subset::ArraySubset;
 use zarrs::filesystem::FilesystemStore;
-use zarrs::storage::{ReadableStorageTraits, StoreKey};
 
 #[derive(Debug, Clone)]
 struct StreamData {
@@ -102,17 +102,12 @@ struct SyncAnalysis {
 
 fn load_zarr_stream_data(store_path: &str) -> Result<Vec<StreamData>> {
     let path = Path::new(store_path);
-    if !path.exists() {
-        return Err(anyhow::anyhow!("Store not found: {}", store_path));
+    if !path.exists() || !path.is_dir() {
+        return Err(anyhow::anyhow!("Store not found or not a directory: {}", store_path));
     }
 
     let store = Arc::new(FilesystemStore::new(store_path)?);
     let mut streams = Vec::new();
-
-    // Find all streams in zarr root
-    if !path.exists() || !path.is_dir() {
-        return Err(anyhow::anyhow!("No streams found in store"));
-    }
 
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
@@ -159,29 +154,29 @@ fn load_zarr_stream_data(store_path: &str) -> Result<Vec<StreamData>> {
         }
 
         // Load attributes from stream group (Zarr v3 format)
-        if let Ok(attrs) = read_attributes(&store, &stream_path) {
-            if let Some(obj) = attrs.as_object() {
-                // Extract stream_info
-                if let Some(stream_info) = obj.get("stream_info") {
-                    stream_data.stream_info = stream_info.clone();
+        if let Ok(attrs) = read_group_attributes(&store, &stream_path)
+            && let Some(obj) = attrs.as_object()
+        {
+            // Extract stream_info
+            if let Some(stream_info) = obj.get("stream_info") {
+                stream_data.stream_info = stream_info.clone();
 
-                    // Extract key information
-                    if let Some(nominal_srate) =
-                        stream_info.get("nominal_srate").and_then(|v| v.as_f64())
-                    {
-                        stream_data.nominal_sample_rate = nominal_srate;
-                    }
-                    if let Some(channel_format) =
-                        stream_info.get("channel_format").and_then(|v| v.as_str())
-                    {
-                        stream_data.channel_format = channel_format.to_string();
-                    }
+                // Extract key information
+                if let Some(nominal_srate) =
+                    stream_info.get("nominal_srate").and_then(|v| v.as_f64())
+                {
+                    stream_data.nominal_sample_rate = nominal_srate;
                 }
+                if let Some(channel_format) =
+                    stream_info.get("channel_format").and_then(|v| v.as_str())
+                {
+                    stream_data.channel_format = channel_format.to_string();
+                }
+            }
 
-                // Extract recorder_config
-                if let Some(recorder_config) = obj.get("recorder_config") {
-                    stream_data.recorder_config = recorder_config.clone();
-                }
+            // Extract recorder_config
+            if let Some(recorder_config) = obj.get("recorder_config") {
+                stream_data.recorder_config = recorder_config.clone();
             }
         }
 
@@ -503,13 +498,11 @@ fn main() -> Result<()> {
     };
 
     let mut all_streams = Vec::new();
-    let mut _found_stores = 0;
 
     // Load data from all available stores
     for store_path in &test_stores {
         match load_zarr_stream_data(store_path) {
             Ok(mut streams) => {
-                _found_stores += 1;
                 println!("Loaded {} stream(s) from {}", streams.len(), store_path);
                 all_streams.append(&mut streams);
             }
@@ -542,26 +535,4 @@ fn main() -> Result<()> {
     print_summary(&analysis);
 
     Ok(())
-}
-
-/// Read attributes from a group's zarr.json file (Zarr v3 format)
-fn read_attributes(store: &Arc<FilesystemStore>, path: &str) -> Result<Value> {
-    let trimmed_path = path.trim_end_matches('/').trim_start_matches('/');
-    let zarr_json_path = if trimmed_path.is_empty() {
-        "zarr.json".to_string()
-    } else {
-        format!("{}/zarr.json", trimmed_path)
-    };
-    let zarr_key = StoreKey::new(&zarr_json_path)?;
-    let zarr_bytes = store
-        .get(&zarr_key)?
-        .ok_or_else(|| anyhow::anyhow!("Metadata not found at {}", zarr_json_path))?;
-    let zarr_metadata: Value = serde_json::from_slice(&zarr_bytes)?;
-
-    // Extract attributes from zarr.json structure
-    if let Some(attrs) = zarr_metadata.get("attributes") {
-        Ok(attrs.clone())
-    } else {
-        Ok(serde_json::json!({}))
-    }
 }
